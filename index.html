@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dungeon Hockey - COMP 4300</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #05080e;
+      font-family: 'Courier New', monospace;
+      color: #00ddff;
+      overflow: hidden;
+    }
+
+    #hud {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 40px;
+      font-size: 18px;
+      z-index: 100;
+      text-shadow: 0 0 10px #0055bb;
+    }
+
+    #hud > div {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #hud label {
+      color: #66aacc;
+      font-weight: bold;
+    }
+
+    #controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 14px;
+      color: #66aacc;
+      text-align: center;
+      z-index: 100;
+      text-shadow: 0 0 8px #0055bb;
+    }
+
+    #flash {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 48px;
+      font-weight: bold;
+      z-index: 200;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease-out;
+    }
+
+    #flash.good {
+      color: #00ff88;
+      text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff88;
+    }
+
+    #flash.bad {
+      color: #ff3333;
+      text-shadow: 0 0 20px #ff3333, 0 0 40px #ff3333;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div>
+      <label>SCORE:</label>
+      <span id="score">0</span>
+    </div>
+    <div>
+      <label>HEALTH:</label>
+      <span id="health">100</span>
+    </div>
+    <div>
+      <label>ROOM:</label>
+      <span id="room">1</span>
+    </div>
+  </div>
+
+  <div id="controls">
+    WASD: Move | SPACE: Shoot | SHIFT: Pass
+  </div>
+
+  <div id="flash"></div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
