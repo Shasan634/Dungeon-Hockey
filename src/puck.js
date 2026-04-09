@@ -11,7 +11,10 @@ export const puck = {
   vz: 0,
   radius: 0.22,
   friction: 0.97,
-  mesh: null
+  mesh: null,
+  // Possession state
+  holder: null,          // entity currently carrying the puck (player or linemate)
+  releaseCooldown: 0     // seconds after shoot/pass before shooter can re-grab
 };
 
 /**
@@ -25,6 +28,8 @@ export function initPuck(spawnWorld, levelGroup) {
   puck.z = spawnWorld.z;
   puck.vx = 0;
   puck.vz = 0;
+  puck.holder = null;
+  puck.releaseCooldown = 0;
 
   // Create puck mesh (flat cylinder)
   const geometry = new THREE.CylinderGeometry(puck.radius, puck.radius, 0.2, 16);
@@ -54,6 +59,28 @@ export function initPuck(spawnWorld, levelGroup) {
  * Mutates: puck object
  */
 export function updatePuck(dt, player, linemates, onGoal, goalPos) {
+  // Tick release cooldown so the shooter can eventually re-grab
+  if (puck.releaseCooldown > 0) puck.releaseCooldown -= dt;
+
+  // ── Possession mode ──────────────────────────────────────────────────────
+  // When a holder carries the puck, lock it just in front of them and skip
+  // all free-puck physics. Goal detection still runs so you can carry it in.
+  if (puck.holder) {
+    const h = puck.holder;
+    const carryDist = h.radius + puck.radius + 0.05;
+    puck.x = h.x + h.fx * carryDist;
+    puck.z = h.z + h.fz * carryDist;
+    puck.vx = 0;
+    puck.vz = 0;
+
+    if (puck.mesh) puck.mesh.position.set(puck.x, 0.1, puck.z);
+
+    const goalDist = Math.hypot(puck.x - goalPos.x, puck.z - goalPos.z);
+    if (goalDist < 2.2) onGoal();
+    return;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Update position
   puck.x += puck.vx * dt;
   puck.z += puck.vz * dt;
@@ -69,43 +96,35 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos) {
   // Wall collision (with velocity dampening)
   resolveWalls(puck, true);
 
-  // Player collision - transfer momentum
-  const dx = puck.x - player.x;
-  const dz = puck.z - player.z;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-
-  if (dist < puck.radius + player.radius && dist > 0) {
-    // Push puck away from player
-    const nx = dx / dist;
-    const nz = dz / dist;
-
-    // Separate puck from player
-    const overlap = (puck.radius + player.radius) - dist;
-    puck.x += nx * overlap;
-    puck.z += nz * overlap;
-
-    // Transfer player velocity to puck (amplified)
-    puck.vx = player.vx * 1.5;
-    puck.vz = player.vz * 1.5;
+  // Player collision - deflect free puck
+  {
+    const dx = puck.x - player.x;
+    const dz = puck.z - player.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < puck.radius + player.radius && dist > 0) {
+      const nx = dx / dist;
+      const nz = dz / dist;
+      const overlap = (puck.radius + player.radius) - dist;
+      puck.x += nx * overlap;
+      puck.z += nz * overlap;
+      puck.vx = player.vx * 1.5;
+      puck.vz = player.vz * 1.5;
+    }
   }
 
-  // Linemate collision - deflect puck
+  // Linemate collision - deflect free puck
   for (const linemate of linemates) {
     const ldx = puck.x - linemate.x;
     const ldz = puck.z - linemate.z;
-    const ldist = Math.sqrt(ldx * ldx + ldz * ldz);
+    const ldist = Math.hypot(ldx, ldz);
     const lradius = linemate.radius || 0.4;
 
     if (ldist < puck.radius + lradius && ldist > 0) {
-      // Deflect puck
       const lnx = ldx / ldist;
       const lnz = ldz / ldist;
-
       const overlap = (puck.radius + lradius) - ldist;
       puck.x += lnx * overlap;
       puck.z += lnz * overlap;
-
-      // Bounce off linemate
       const dot = puck.vx * lnx + puck.vz * lnz;
       puck.vx -= 2 * dot * lnx;
       puck.vz -= 2 * dot * lnz;
@@ -114,69 +133,67 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos) {
     }
   }
 
-  // Check goal - using TILE units (1.1 tiles = 2.2 world units)
-  const goalDist = Math.sqrt(
-    (puck.x - goalPos.x) ** 2 + (puck.z - goalPos.z) ** 2
-  );
+  // Check goal
+  const goalDist = Math.hypot(puck.x - goalPos.x, puck.z - goalPos.z);
+  if (goalDist < 2.2) onGoal();
 
-  if (goalDist < 2.2) {
-    onGoal();
-  }
-
-  // Update mesh position
-  if (puck.mesh) {
-    puck.mesh.position.set(puck.x, 0.1, puck.z);
-  }
+  if (puck.mesh) puck.mesh.position.set(puck.x, 0.1, puck.z);
 }
 
 /**
- * Shoots the puck in the direction the player is facing
- * @param {Object} player - player object with {fx, fz}
+ * Shoots the puck in the direction the shooter is facing.
+ * No-ops if the shooter does not currently possess the puck.
+ * @param {Object} shooter - any entity with {fx, fz} (player or linemate)
  * @param {Object} puck - puck object
- * Mutates: puck.vx, puck.vz
+ * Mutates: puck.holder, puck.releaseCooldown, puck.vx, puck.vz
  */
-export function shoot(player, puck) {
+export function shoot(shooter, puck) {
+  if (puck.holder !== shooter) return; // must have possession
+  puck.holder = null;
+  puck.releaseCooldown = 0.35; // prevent immediate re-grab
   const speed = 13;
-  puck.vx = player.fx * speed;
-  puck.vz = player.fz * speed;
+  puck.vx = shooter.fx * speed;
+  puck.vz = shooter.fz * speed;
 }
 
 /**
- * Passes the puck toward the nearest linemate
- * @param {Object} player - player object with {x, z}
+ * Passes the puck toward the nearest entity in `others`.
+ * No-ops if the shooter does not currently possess the puck.
+ * Falls back to shooting if no targets exist.
+ * @param {Object} shooter - entity initiating the pass with {x, z, fx, fz}
  * @param {Object} puck - puck object
- * @param {Array} linemates - array of linemate entities with {x, z}
- * Mutates: puck.vx, puck.vz
+ * @param {Array} others - pass targets (player + linemates, minus the shooter)
+ * Mutates: puck.holder, puck.releaseCooldown, puck.vx, puck.vz
  */
-export function pass(player, puck, linemates) {
-  if (linemates.length === 0) {
-    // No linemates - shoot forward instead
-    shoot(player, puck);
+export function pass(shooter, puck, others) {
+  if (puck.holder !== shooter) return; // must have possession
+
+  if (others.length === 0) {
+    shoot(shooter, puck);
     return;
   }
 
-  // Find nearest linemate
+  // Find nearest pass target to the shooter
   let nearest = null;
   let minDist = Infinity;
 
-  for (const linemate of linemates) {
-    const dx = linemate.x - player.x;
-    const dz = linemate.z - player.z;
+  for (const target of others) {
+    const dx = target.x - shooter.x;
+    const dz = target.z - shooter.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-
     if (dist < minDist) {
       minDist = dist;
-      nearest = linemate;
+      nearest = target;
     }
   }
 
   if (nearest) {
-    // Pass toward nearest linemate
     const dx = nearest.x - puck.x;
     const dz = nearest.z - puck.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-
     if (dist > 0) {
+      puck.holder = null;
+      puck.releaseCooldown = 0.1; // short cooldown — receiver should pick up fast
       const speed = 11;
       puck.vx = (dx / dist) * speed;
       puck.vz = (dz / dist) * speed;

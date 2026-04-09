@@ -382,17 +382,256 @@ export class Defender {
 }
 
 /**
- * Linemate entity - will implement flocking behavior in Phase 6
+ * Linemate entity - friendly AI with flocking behavior (Phase 6)
+ *
+ * All linemates share identical color and design. The one nearest to the puck
+ * becomes the active linemate: it is highlighted with a yellow ring and its
+ * movement is driven by player input (WASD) instead of flocking. All other
+ * linemates continue to use autonomous flocking (cohesion + separation +
+ * alignment) relative to the main player.
+ *
+ * Flocking behaviors (applied when NOT controlled):
+ *   Cohesion   — pull toward player, weighted linearly by distance.
+ *   Separation — graded repulsion from player and other linemates.
+ *   Alignment  — steer to match player's velocity direction, scaled by speed.
  */
 export class Linemate {
   constructor(x, z, levelGroup) {
     this.x = x;
     this.z = z;
+    this.vx = 0;
+    this.vz = 0;
     this.radius = 0.4;
+    this.fx = 1;    // facing direction x (used for shoot)
+    this.fz = 0;    // facing direction z
+    this.angle = 0;
+
+    // Teal cylinder — identical design for every linemate
+    const geometry = new THREE.CylinderGeometry(0.35, 0.35, 0.52, 10);
+    this.mat = new THREE.MeshStandardMaterial({
+      color: 0x22dd88,
+      emissive: 0x116644,
+      emissiveIntensity: 0.5
+    });
+    this.mesh = new THREE.Mesh(geometry, this.mat);
+    this.mesh.position.set(this.x, 0.26, this.z);
+
+    // Atmospheric glow
+    const light = new THREE.PointLight(0x22dd88, 0.6, 2.5);
+    light.position.set(0, 0.4, 0);
+    this.mesh.add(light);
+
+    // Yellow ring shown when this linemate is the active/controlled one
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0xffee00,
+      emissive: 0xffee00,
+      emissiveIntensity: 2.5
+    });
+    this.highlightRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.07, 8, 28),
+      ringMat
+    );
+    this.highlightRing.rotation.x = Math.PI / 2; // lay flat on the ground plane
+    this.highlightRing.position.y = -0.22;
+    this.highlightRing.visible = false;
+    this.mesh.add(this.highlightRing);
+
+    levelGroup.add(this.mesh);
   }
 
-  update(dt, others) {
-    // Phase 5: Collision avoidance
-    // Phase 6: Flocking
+  /**
+   * Shows or hides the highlight ring.
+   * Called each frame by main.js based on who is closest to the puck.
+   * @param {boolean} active
+   */
+  setHighlight(active) {
+    this.highlightRing.visible = active;
+  }
+
+  /**
+   * Main update — delegates to controlled or autonomous path.
+   * @param {number} dt - delta time in seconds
+   * @param {{player: Object, linemates: Array, keys: Object|null, puck: Object}} context
+   *   keys: live key state when this linemate is controlled; null otherwise
+   */
+  update(dt, { player, linemates, keys, puck }) {
+    if (keys) {
+      this._updateControlled(dt, keys);
+    } else {
+      this._updateAutonomous(dt, player, linemates, puck);
+    }
+
+    if (this.mesh) {
+      this.mesh.position.set(this.x, 0.26, this.z);
+      this.mesh.rotation.y = this.angle;
+    }
+  }
+
+  /**
+   * Player-driven movement — same WASD feel as the main player.
+   * Updates fx/fz so shoot() works correctly from a linemate.
+   */
+  _updateControlled(dt, keys) {
+    let ix = 0, iz = 0;
+    if (keys.w) iz -= 1;
+    if (keys.s) iz += 1;
+    if (keys.a) ix -= 1;
+    if (keys.d) ix += 1;
+
+    const mag = Math.hypot(ix, iz);
+    if (mag > 0) { ix /= mag; iz /= mag; }
+
+    this.vx = ix * 5.2;
+    this.vz = iz * 5.2;
+
+    if (mag > 0) {
+      this.fx = ix;
+      this.fz = iz;
+      this.angle = Math.atan2(ix, iz);
+    }
+
+    this.x += this.vx * dt;
+    this.z += this.vz * dt;
+    resolveWalls(this);
+  }
+
+  /**
+   * Autonomous movement — three distinct modes based on puck possession:
+   *
+   *   No linemate holds the puck
+   *     → Seek the puck directly. Both linemates converge on it so either
+   *       can pick it up and immediately enter possession mode.
+   *
+   *   This linemate holds the puck (controlled by player input via _updateControlled,
+   *   so this path is never reached for the carrier itself.)
+   *
+   *   Another linemate holds the puck
+   *     → One non-carrier takes a LEAD position (LEAD_DIST ahead of the carrier
+   *       in the carrier's facing direction) and one takes a TRAIL position
+   *       (TRAIL_DIST behind). Role is assigned by dot-product: whichever
+   *       non-carrier is currently more "in front" of the carrier leads, the
+   *       other trails. This creates natural forward and backward pass lanes.
+   *
+   * Separation from the player and other linemates is applied in all modes
+   * to prevent stacking.
+   *
+   * @param {number} dt
+   * @param {Object} player
+   * @param {Array}  linemates - full linemates array (includes this)
+   * @param {Object} puck      - puck object with .holder, .x, .z
+   */
+  _updateAutonomous(dt, player, linemates, puck) {
+    const SPRINT_STRENGTH = 30.0; // puck-seek acceleration — equilibrium 7.5 → clamped to MAX_SPEED
+    const FORM_STRENGTH   = 20.0; // formation seek acceleration (lead/trail positioning)
+    const SEP_STRENGTH    = 12.0; // separation acceleration
+    const SEP_PLAYER_R    = 2.8;  // min distance from player
+    const SEP_MATE_R      = 2.2;  // min distance between linemates
+    const DRAG            = 4.0;  // velocity damping (1/s)
+    const MAX_SPEED       = 5.2;
+    const LEAD_DIST       = 3.5;  // units ahead of carrier for the lead linemate
+    const TRAIL_DIST      = 3.0;  // units behind carrier for the trail linemate
+
+    // ── Determine seek target ─────────────────────────────────────────────
+    let targetX, targetZ;
+
+    // Is a linemate (other than this one) holding the puck?
+    const carrier = linemates.find(lm => lm !== this && lm === puck.holder);
+
+    if (carrier) {
+      // ── Possession mode: position relative to carrier ──────────────────
+      // Among the non-carrier linemates, assign roles by dot product with
+      // the carrier's facing direction: the one more "in front" leads.
+      const others = linemates.filter(lm => lm !== carrier);
+
+      // Dot product of (linemate → carrier) projected onto carrier facing
+      const myDot   = (this.x - carrier.x) * carrier.fx + (this.z - carrier.z) * carrier.fz;
+      const peer    = others.find(lm => lm !== this);
+      const peerDot = peer
+        ? (peer.x - carrier.x) * carrier.fx + (peer.z - carrier.z) * carrier.fz
+        : -Infinity;
+
+      // Higher dot = more "in front" of the carrier → takes lead position
+      const isLead = myDot >= peerDot;
+
+      if (isLead) {
+        targetX = carrier.x + carrier.fx * LEAD_DIST;
+        targetZ = carrier.z + carrier.fz * LEAD_DIST;
+      } else {
+        targetX = carrier.x - carrier.fx * TRAIL_DIST;
+        targetZ = carrier.z - carrier.fz * TRAIL_DIST;
+      }
+    } else {
+      // ── No linemate has the puck — seek the puck ──────────────────────
+      // Covers both free-puck and player-has-puck cases. Linemates converge
+      // on the puck so they're in position to receive a pass or pick it up.
+      targetX = puck.x;
+      targetZ = puck.z;
+    }
+
+    // ── Seek target ───────────────────────────────────────────────────────
+    let ax = 0, az = 0;
+    {
+      const dx = targetX - this.x;
+      const dz = targetZ - this.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.05) {
+        if (carrier) {
+          // Formation positioning: arrive taper within 2 units to avoid overshoot
+          const weight = Math.min(dist / 2.0, 1.0);
+          ax += (dx / dist) * FORM_STRENGTH * weight;
+          az += (dz / dist) * FORM_STRENGTH * weight;
+        } else {
+          // Puck sprint: no arrive damping — full force all the way to the puck
+          // SPRINT_STRENGTH / DRAG = 30/4 = 7.5 equilibrium → clamped to MAX_SPEED
+          ax += (dx / dist) * SPRINT_STRENGTH;
+          az += (dz / dist) * SPRINT_STRENGTH;
+        }
+      }
+    }
+
+    // ── Separation from player ────────────────────────────────────────────
+    {
+      const dx = this.x - player.x;
+      const dz = this.z - player.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < SEP_PLAYER_R && dist > 1e-4) {
+        const grade = 1.0 - dist / SEP_PLAYER_R;
+        ax += (dx / dist) * SEP_STRENGTH * grade;
+        az += (dz / dist) * SEP_STRENGTH * grade;
+      }
+    }
+
+    // ── Separation from other linemates ──────────────────────────────────
+    for (const other of linemates) {
+      if (other === this) continue;
+      const dx = this.x - other.x;
+      const dz = this.z - other.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < SEP_MATE_R && dist > 1e-4) {
+        const grade = 1.0 - dist / SEP_MATE_R;
+        ax += (dx / dist) * SEP_STRENGTH * grade;
+        az += (dz / dist) * SEP_STRENGTH * grade;
+      }
+    }
+
+    // ── Integrate (velocity-proportional drag, frame-rate stable) ────────
+    this.vx = this.vx * (1.0 - DRAG * dt) + ax * dt;
+    this.vz = this.vz * (1.0 - DRAG * dt) + az * dt;
+
+    const spd = Math.hypot(this.vx, this.vz);
+    if (spd > MAX_SPEED) {
+      this.vx = (this.vx / spd) * MAX_SPEED;
+      this.vz = (this.vz / spd) * MAX_SPEED;
+    }
+
+    this.x += this.vx * dt;
+    this.z += this.vz * dt;
+    resolveWalls(this);
+
+    if (spd > 0.1) {
+      this.fx = this.vx / spd;
+      this.fz = this.vz / spd;
+      this.angle = Math.atan2(this.vx, this.vz);
+    }
   }
 }

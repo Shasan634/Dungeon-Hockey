@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { initScene, render, levelGroup } from './src/scene.js';
 import { buildLevel } from './src/level.js';
 import { player, initPlayer, updatePlayer } from './src/player.js';
-import { puck, initPuck, updatePuck } from './src/puck.js';
+import { puck, initPuck, updatePuck, shoot, pass } from './src/puck.js';
 import { Defender, Linemate } from './src/entities.js';
 import { updateHUD, flash } from './src/hud.js';
 
@@ -20,6 +20,11 @@ let goalPos = { x: 0, z: 0 };
 const defenders = [];
 const linemates = [];
 
+// The entity (player or linemate) currently driven by WASD.
+// Updated every frame to whichever is closest to the puck.
+let controlled = player;
+
+
 // Input state
 const keys = {
   w: false,
@@ -31,11 +36,40 @@ const keys = {
 // Initialize scene
 const { scene, camera, renderer } = initScene();
 
+/**
+ * Returns whichever entity (player or linemate) is closest to the puck.
+ * That entity gets WASD control and is highlighted.
+ */
+function findControlled() {
+  let best = player;
+  let minD = Math.hypot(player.x - puck.x, player.z - puck.z);
+  for (const lm of linemates) {
+    const d = Math.hypot(lm.x - puck.x, lm.z - puck.z);
+    if (d < minD) { minD = d; best = lm; }
+  }
+  return best;
+}
+
 // Input handling
 window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
   if (key in keys) keys[key] = true;
 
+  if (!gameActive) return;
+
+  // Shoot — Space. Uses puck.holder directly so it always targets the carrier.
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (puck.holder) shoot(puck.holder, puck);
+  }
+
+  // Pass — E. Sends puck from the current holder to the nearest other entity.
+  if (key === 'e') {
+    if (puck.holder) {
+      const others = [player, ...linemates].filter(t => t !== puck.holder);
+      pass(puck.holder, puck, others);
+    }
+  }
 });
 
 window.addEventListener('keyup', (e) => {
@@ -57,6 +91,16 @@ function buildNewLevel() {
   // Spawn player and puck
   initPlayer(levelData.spawnWorld, levelGroup);
   initPuck(levelData.spawnWorld, levelGroup);
+
+  // Clear old linemates
+  linemates.forEach(l => {
+    if (l.mesh) levelGroup.remove(l.mesh);
+  });
+  linemates.length = 0;
+
+  // Spawn 2 linemates flanking the player spawn
+  linemates.push(new Linemate(levelData.spawnWorld.x + 1.5, levelData.spawnWorld.z, levelGroup));
+  linemates.push(new Linemate(levelData.spawnWorld.x - 1.5, levelData.spawnWorld.z, levelGroup));
 
   // Clear old defenders
   defenders.forEach(d => {
@@ -139,19 +183,59 @@ function animate() {
   if (dt > 0.05) dt = 0.05;
 
   if (gameActive) {
-    // Update player
-    updatePlayer(dt, keys, puck, defenders, onDamage);
+    // ── Pickup ───────────────────────────────────────────────────────────
+    // The entity closest to the puck is the only one that can pick it up.
+    // This keeps `controlled` purely for pickup arbitration — it is NOT used
+    // to route WASD (that is done by puck.holder below).
+    if (puck.holder === null && puck.releaseCooldown <= 0) {
+      controlled = findControlled();
+      const pickupR = controlled.radius + puck.radius + 0.5;
+      if (Math.hypot(controlled.x - puck.x, controlled.z - puck.z) < pickupR) {
+        puck.holder = controlled;
+      }
+    }
+
+    // ── Highlights ───────────────────────────────────────────────────────
+    // Yellow ring on whoever holds the puck (player or linemate).
+    if (player.highlightRing) player.highlightRing.visible = (puck.holder === player);
+    for (const lm of linemates) {
+      lm.setHighlight(lm === puck.holder);
+    }
+
+    // ── WASD / seek routing for player ───────────────────────────────────
+    // • Player holds puck  → WASD
+    // • No one holds puck  → player sprints to puck (same as linemates)
+    // • Linemate holds puck→ player trails behind the carrier (pass lane)
+    let playerSeekTarget = null;
+    if (puck.holder !== player) {
+      if (!puck.holder) {
+        playerSeekTarget = { x: puck.x, z: puck.z };
+      } else {
+        // Carrier is a linemate; the other linemate takes lead automatically.
+        // Player always trails so there is a backward pass lane.
+        const carrier = puck.holder;
+        playerSeekTarget = {
+          x: carrier.x - carrier.fx * 3.0,
+          z: carrier.z - carrier.fz * 3.0
+        };
+      }
+    }
+    updatePlayer(dt, keys, defenders, onDamage, playerSeekTarget);
 
     // Update puck
     updatePuck(dt, player, linemates, onGoal, goalPos);
 
-    // Update entities
+    // Update defenders
     for (const defender of defenders) {
       defender.update(dt, defenders);
     }
 
-    for (const linemate of linemates) {
-      linemate.update(dt, { player, puck, linemates });
+    // A linemate only gets WASD when it is the puck holder.
+    // All others receive null → _updateAutonomous runs:
+    //   • No carrier in linemates → seek the puck
+    //   • Another linemate is carrier → take lead or trail position
+    for (const lm of linemates) {
+      lm.update(dt, { player, linemates, keys: lm === puck.holder ? keys : null, puck });
     }
   }
 
