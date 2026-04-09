@@ -83,7 +83,9 @@ Behaviour tree AI with priority-based decision making has been implemented for D
 - Overrides all other states (even CHASE)
 
 **Behavior:**
-- Paths to goal position to intercept player
+- **Intercepts puck path to goal** (not just standing in goal!)
+- Positions 2 units in front of goal, between puck and goal
+- Dynamically tracks puck movement, adjusting intercept position
 - Repath cooldown: **0.4 seconds**
 - Speed multiplier: **1.4x** (fastest)
 - **Why highest priority**: Preventing goals is more critical than chasing the puck

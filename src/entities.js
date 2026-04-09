@@ -62,6 +62,7 @@ export class Defender {
 
   /**
    * Main update loop
+   * Order: cooldown → tick → path follow → avoidance → physics → render
    * @param {number} dt - delta time in seconds
    * @param {Array} allDefenders - array of all defender entities
    * Mutates: this.x, this.z, this.vx, this.vz, this.angle, this.path, this.state
@@ -97,7 +98,10 @@ export class Defender {
       this.vz *= 0.75;
     }
 
-    // 4. Collision avoidance - TODO: Phase 5 implementation
+    // 4. Collision avoidance - Reynolds-style separation
+    // Runs after path following sets the desired velocity, but before position update.
+    // This allows avoidance forces to modify velocity while maintaining pathfinding intent.
+    this._avoidOthers(allDefenders);
 
     // 5. Update position
     this.x += this.vx * dt;
@@ -106,11 +110,24 @@ export class Defender {
     // 6. Wall collision
     resolveWalls(this);
 
-    // 7. Update mesh
+    // 7. Physical push against player
+    // Defender gives way slightly (0.3 factor) to avoid being totally immovable.
+    // Damage is still handled in updatePlayer - this is just the physical interaction.
+    const dx = this.x - this.player.x;
+    const dz = this.z - this.player.z;
+    const d = Math.hypot(dx, dz);
+    const minD = this.radius + this.player.radius;
+    if (d < minD && d > 1e-4) {
+      const overlap = minD - d;
+      this.x += (dx / d) * overlap * 0.3;
+      this.z += (dz / d) * overlap * 0.3;
+    }
+
+    // 8. Update mesh
     this.mesh.position.set(this.x, 0.26, this.z);
     this.mesh.rotation.y = this.angle;
 
-    // 8. Update material colors based on state
+    // 9. Update material colors based on state
     this._updateColors();
   }
 
@@ -150,9 +167,11 @@ export class Defender {
         this.pathCooldown = 0;
       }
 
-      // Repath to goal position when cooldown expires
+      // Repath to intercept position between puck and goal
+      // This makes defenders actively block the puck rather than just standing in goal
       if (this.pathCooldown <= 0) {
-        this._repath(this.goalPos.x, this.goalPos.z);
+        const interceptPos = this._calculateIntercept(this.puck.x, this.puck.z, this.goalPos.x, this.goalPos.z);
+        this._repath(interceptPos.x, interceptPos.z);
         this.pathCooldown = 0.4;
       }
     }
@@ -241,6 +260,40 @@ export class Defender {
   }
 
   /**
+   * Reynolds-style separation force to avoid clustering with other defenders
+   * Applies repulsive force when defenders get too close to each other.
+   *
+   * The 0.5 padding on top of combined radii keeps defenders visually separated
+   * even before they are physically overlapping. This prevents the "clumping"
+   * effect where multiple defenders stack on the same tile.
+   *
+   * The 1e-4 guard prevents division by zero when two defenders are at exactly
+   * the same position (edge case during spawning or physics glitches).
+   *
+   * @param {Array} allDefenders - array of all defender entities
+   * Mutates: this.vx, this.vz
+   */
+  _avoidOthers(allDefenders) {
+    for (const other of allDefenders) {
+      if (other === this) continue;
+
+      const dx = this.x - other.x;
+      const dz = this.z - other.z;
+      const d = Math.hypot(dx, dz);
+
+      // minDist includes 0.5 padding for visual separation
+      const minDist = this.radius + other.radius + 0.5;
+
+      if (d < minDist && d > 1e-4) {
+        // Apply separation force proportional to penetration depth
+        const force = (minDist - d) * 2.0;
+        this.vx += (dx / d) * force;
+        this.vz += (dz / d) * force;
+      }
+    }
+  }
+
+  /**
    * Calculates Euclidean distance between two points
    * @param {number} x1 - first point x
    * @param {number} z1 - first point z
@@ -252,6 +305,39 @@ export class Defender {
     const dx = x2 - x1;
     const dz = z2 - z1;
     return Math.sqrt(dx * dx + dz * dz);
+  }
+
+  /**
+   * Calculates intercept position between puck and goal for blocking
+   * Positions defender on the line between puck and goal, 2 units in front of goal.
+   * This creates active blocking behavior rather than just standing in the goal.
+   *
+   * @param {number} puckX - puck world x position
+   * @param {number} puckZ - puck world z position
+   * @param {number} goalX - goal world x position
+   * @param {number} goalZ - goal world z position
+   * @returns {{x: number, z: number}} intercept position in world coordinates
+   */
+  _calculateIntercept(puckX, puckZ, goalX, goalZ) {
+    // Calculate direction from goal to puck
+    const dx = puckX - goalX;
+    const dz = puckZ - goalZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // If puck is very close to goal or at goal, just defend goal position
+    if (dist < 2.0) {
+      return { x: goalX, z: goalZ };
+    }
+
+    // Position defender 2 units from goal toward the puck
+    const interceptDist = 2.0;
+    const nx = dx / dist;
+    const nz = dz / dist;
+
+    return {
+      x: goalX + nx * interceptDist,
+      z: goalZ + nz * interceptDist
+    };
   }
 
   /**

@@ -149,17 +149,32 @@ Priority selector behaviour tree for Defender AI:
 
 **Testing**: See [PHASE4-BEHAVIOUR-TREE.md](PHASE4-BEHAVIOUR-TREE.md) for state testing and tuning guide.
 
-## Next Steps - Phase 5
+### Phase 5: Collision Avoidance (Complex Movement) ✅
 
-**Collision Avoidance Steering**
+**File**: [src/entities.js](src/entities.js)
 
-The behaviour tree provides high-level decisions. Next steps:
-- **Phase 5**: Collision avoidance for smooth defender movement
-- **Phase 6**: Flocking behavior for Linemates
+Reynolds-style separation steering for smooth defender movement:
+- **Defender separation**: Repulsive force prevents clustering and stacking
+- **0.5 padding**: Maintains visual spacing even before physical overlap
+- **Player push**: Defenders give way (30%) when contacting player
+- **Order matters**: Avoidance modifies velocity after pathfinding, before physics
 
-**File to modify**: [src/entities.js](src/entities.js:100) - TODO comment is already in place
+**Why after path following**: Path following sets the desired velocity (goal), avoidance modifies it (obstacle response), position update applies the final result. This preserves pathfinding intent while adding smooth obstacle avoidance.
 
-The behaviour tree will continue to set goals (CHASE/BLOCK/PATROL), and collision avoidance will adjust velocity to avoid obstacles while pursuing those goals.
+**Visual improvement**: Defenders form natural formations (queues in corridors, walls at goal) instead of stacking on same tile.
+
+**Testing**: See [PHASE5-COLLISION-AVOIDANCE.md](PHASE5-COLLISION-AVOIDANCE.md) for verification tests and tuning guide.
+
+## Next Steps - Phase 6
+
+**Flocking Behavior for Linemates**
+
+Phases 1-5 are complete. Final phase adds coordinated group movement:
+- **Phase 6**: Flocking (Separation + Alignment + Cohesion) for Linemates
+
+**File to modify**: [src/entities.js](src/entities.js:298) - Linemate class is empty and ready
+
+Linemates will move as a coordinated group using three Reynolds behaviors: separate to avoid crowding, align velocity with neighbors, and cohere toward group center.
 
 ## Technical Notes
 
