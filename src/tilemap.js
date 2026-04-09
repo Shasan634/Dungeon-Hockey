@@ -105,25 +105,48 @@ export function resolveWalls(entity, isPuck = false) {
       const distSq = dx * dx + dz * dz;
       const radiusSq = entity.radius * entity.radius;
 
-      if (distSq < radiusSq && distSq > 0) {
-        // Collision detected - push entity out
-        const dist = Math.sqrt(distSq);
-        const overlap = entity.radius - dist;
-        const nx = dx / dist;
-        const nz = dz / dist;
+      if (distSq < radiusSq) {
+        if (distSq > 0) {
+          // Normal case - entity partially overlapping wall edge
+          const dist = Math.sqrt(distSq);
+          const overlap = entity.radius - dist;
+          const nx = dx / dist;
+          const nz = dz / dist;
 
-        entity.x += nx * overlap;
-        entity.z += nz * overlap;
+          entity.x += nx * overlap;
+          entity.z += nz * overlap;
 
-        // Reflect velocity along collision normal
-        const dot = entity.vx * nx + entity.vz * nz;
-        entity.vx -= 2 * dot * nx;
-        entity.vz -= 2 * dot * nz;
+          // Reflect velocity along collision normal
+          const dot = entity.vx * nx + entity.vz * nz;
+          entity.vx -= 2 * dot * nx;
+          entity.vz -= 2 * dot * nz;
 
-        // Dampen puck velocity on wall bounce
-        if (isPuck) {
-          entity.vx *= 0.5;
-          entity.vz *= 0.5;
+          // Dampen puck velocity on wall bounce
+          if (isPuck) {
+            entity.vx *= 0.5;
+            entity.vz *= 0.5;
+          }
+        } else {
+          // Entity center is fully inside wall AABB - eject along shortest axis
+          const penLeft   = entity.x - (wallWorld.x - halfTile);
+          const penRight  = (wallWorld.x + halfTile) - entity.x;
+          const penTop    = entity.z - (wallWorld.z - halfTile);
+          const penBottom = (wallWorld.z + halfTile) - entity.z;
+          const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+
+          if (minPen === penLeft) {
+            entity.x -= penLeft + entity.radius;
+            entity.vx = -Math.abs(entity.vx) * (isPuck ? 0.5 : 1);
+          } else if (minPen === penRight) {
+            entity.x += penRight + entity.radius;
+            entity.vx = Math.abs(entity.vx) * (isPuck ? 0.5 : 1);
+          } else if (minPen === penTop) {
+            entity.z -= penTop + entity.radius;
+            entity.vz = -Math.abs(entity.vz) * (isPuck ? 0.5 : 1);
+          } else {
+            entity.z += penBottom + entity.radius;
+            entity.vz = Math.abs(entity.vz) * (isPuck ? 0.5 : 1);
+          }
         }
       }
     }

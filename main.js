@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { initScene, render, levelGroup } from './src/scene.js';
 import { buildLevel } from './src/level.js';
 import { player, initPlayer, updatePlayer } from './src/player.js';
-import { puck, initPuck, updatePuck, shoot, pass } from './src/puck.js';
+import { puck, initPuck, updatePuck } from './src/puck.js';
 import { Defender, Linemate } from './src/entities.js';
 import { updateHUD, flash } from './src/hud.js';
 
@@ -36,17 +36,6 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
   if (key in keys) keys[key] = true;
 
-  // Shoot
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (gameActive) shoot(player, puck);
-  }
-
-  // Pass
-  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
-    e.preventDefault();
-    if (gameActive) pass(player, puck, linemates);
-  }
 });
 
 window.addEventListener('keyup', (e) => {
