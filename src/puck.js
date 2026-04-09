@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { resolveWalls } from './tilemap.js';
+import { playWallHit, playShoot, playPass } from './audio.js';
 
 // Shared geometry and material for puck trails (performance optimization)
 const sharedPuckTrailGeometry = new THREE.SphereGeometry(0.15, 6, 6);
@@ -79,8 +80,15 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
   if (Math.abs(puck.vx) < 0.01) puck.vx = 0;
   if (Math.abs(puck.vz) < 0.01) puck.vz = 0;
 
-  // Wall collision (with velocity dampening)
+  // Wall collision (with velocity dampening) - track speed before/after for audio
+  const speedBefore = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
   resolveWalls(puck, true);
+  const speedAfter = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
+
+  // Play wall hit sound if puck bounced (significant speed drop)
+  if (speedBefore > 2.0 && speedAfter < speedBefore * 0.8) {
+    playWallHit(speedBefore);
+  }
 
   // Player collision - transfer momentum
   const dx = puck.x - player.x;
@@ -187,6 +195,7 @@ export function shoot(player, puck) {
   const speed = 13;
   puck.vx = player.fx * speed;
   puck.vz = player.fz * speed;
+  playShoot(); // Audio feedback
 }
 
 /**
@@ -202,6 +211,8 @@ export function pass(player, puck, linemates) {
     shoot(player, puck);
     return;
   }
+
+  playPass(); // Audio feedback
 
   // Find nearest linemate
   let nearest = null;

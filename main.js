@@ -8,10 +8,12 @@ import { player, initPlayer, updatePlayer } from './src/player.js';
 import { puck, initPuck, updatePuck } from './src/puck.js';
 import { Defender, Linemate } from './src/entities.js';
 import { updateHUD, flash, hitFlash } from './src/hud.js';
+import { initAudio, resumeAudio, playGoal, playHit, startAmbient } from './src/audio.js';
 
 // Game state
 let gameActive = false;
 let gameStarted = false;
+let isGameOver = false;
 let score = 0;
 let health = 100;
 let room = 1;
@@ -39,10 +41,29 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
   if (key in keys) keys[key] = true;
 
+  // Handle game over screen restart
+  if (isGameOver) {
+    isGameOver = false;
+    gameStarted = true;
+    document.getElementById('game-over-screen').classList.add('hidden');
+
+    // Reset game
+    score = 0;
+    health = 100;
+    room = 1;
+    buildNewLevel();
+    return;
+  }
+
   // Handle start screen
   if (!gameStarted) {
     gameStarted = true;
     document.getElementById('start-screen').classList.add('hidden');
+
+    // Initialize audio context after user gesture (browser autoplay policy)
+    initAudio();
+    startAmbient();
+
     buildNewLevel();
   }
 });
@@ -126,9 +147,11 @@ function onDamage() {
   updateHUD(score, health, room);
   flash('HIT!', false);
   hitFlash(); // Red screen flash
+  playHit(); // Audio feedback
 
   if (health <= 0) {
     gameActive = false;
+    isGameOver = true;
     flash('GAME OVER', false);
 
     // Show game over screen
@@ -139,25 +162,6 @@ function onDamage() {
     if (finalScoreEl) finalScoreEl.textContent = score;
     if (finalRoomEl) finalRoomEl.textContent = room - 1;
     if (gameOverScreen) gameOverScreen.classList.remove('hidden');
-
-    gameStarted = false;
-
-    // Wait for keypress to restart
-    const restartHandler = () => {
-      if (!gameStarted) {
-        gameStarted = true;
-        if (gameOverScreen) gameOverScreen.classList.add('hidden');
-
-        // Reset game
-        score = 0;
-        health = 100;
-        room = 1;
-        buildNewLevel();
-
-        window.removeEventListener('keydown', restartHandler);
-      }
-    };
-    window.addEventListener('keydown', restartHandler);
   }
 }
 
@@ -173,6 +177,7 @@ function onGoal() {
   room += 1;
 
   flash('GOAL!', true);
+  playGoal(); // Audio feedback
   updateHUD(score, health, room);
 
   // Build next level after delay
@@ -192,6 +197,9 @@ function animate() {
   if (dt > 0.05) dt = 0.05;
 
   const t = clock.getElapsedTime();
+
+  // Resume audio if suspended (tab backgrounded)
+  resumeAudio();
 
   // Animate torch flames (always, even when game inactive)
   for (let i = 0; i < torchFlames.length; i++) {
