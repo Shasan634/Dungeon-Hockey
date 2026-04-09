@@ -4,6 +4,14 @@
 import * as THREE from 'three';
 import { resolveWalls } from './tilemap.js';
 
+// Shared geometry and material for puck trails (performance optimization)
+const sharedPuckTrailGeometry = new THREE.SphereGeometry(0.15, 6, 6);
+const sharedPuckTrailMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff6600,
+  transparent: true,
+  opacity: 0.7
+});
+
 export const puck = {
   x: 0,
   z: 0,
@@ -11,7 +19,8 @@ export const puck = {
   vz: 0,
   radius: 0.22,
   friction: 0.97,
-  mesh: null
+  mesh: null,
+  trails: [] // Array of {mesh, life, index} for trail effect
 };
 
 /**
@@ -41,6 +50,9 @@ export function initPuck(spawnWorld, levelGroup) {
   light.position.set(0, 0.3, 0);
   puck.mesh.add(light);
 
+  // Clear old trails
+  puck.trails = [];
+
   levelGroup.add(puck.mesh);
 }
 
@@ -51,9 +63,10 @@ export function initPuck(spawnWorld, levelGroup) {
  * @param {Array} linemates - array of linemate entities
  * @param {Function} onGoal - callback when puck reaches goal
  * @param {{x: number, z: number}} goalPos - goal position in world coordinates
+ * @param {THREE.Group} levelGroup - group to add trail meshes to
  * Mutates: puck object
  */
-export function updatePuck(dt, player, linemates, onGoal, goalPos) {
+export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
   // Update position
   puck.x += puck.vx * dt;
   puck.z += puck.vz * dt;
@@ -126,6 +139,41 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos) {
   // Update mesh position
   if (puck.mesh) {
     puck.mesh.position.set(puck.x, 0.1, puck.z);
+  }
+
+  // Spawn trail spheres when puck is moving fast
+  const speed = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
+
+  if (speed > 4.0 && levelGroup && puck.trails.length < 3) {
+    // Clone material to allow independent opacity changes
+    const trailMaterial = sharedPuckTrailMaterial.clone();
+    const trail = new THREE.Mesh(sharedPuckTrailGeometry, trailMaterial);
+    trail.position.set(puck.x, 0.1, puck.z);
+    levelGroup.add(trail);
+
+    puck.trails.push({ mesh: trail, life: 0.15, index: puck.trails.length });
+  }
+
+  // Update and fade trail spheres
+  for (let i = puck.trails.length - 1; i >= 0; i--) {
+    const trail = puck.trails[i];
+    trail.life -= dt;
+
+    if (trail.life <= 0) {
+      // Remove expired trail
+      if (levelGroup && trail.mesh.parent) {
+        levelGroup.remove(trail.mesh);
+      }
+      puck.trails.splice(i, 1);
+    } else {
+      // Fade out trail based on remaining life
+      const fadeAmount = trail.life / 0.15;
+      trail.mesh.material.opacity = fadeAmount * 0.7;
+
+      // Scale down trail as it fades
+      const scale = 0.5 + fadeAmount * 0.5;
+      trail.mesh.scale.set(scale, scale, scale);
+    }
   }
 }
 
