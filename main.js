@@ -45,7 +45,7 @@ window.addEventListener('keyup', (e) => {
 
 /**
  * Builds a new level, spawns player and puck, resets game state
- * Mutates: gameActive, goalPos, player, puck, levelGroup
+ * Mutates: gameActive, goalPos, player, puck, defenders, levelGroup
  */
 function buildNewLevel() {
   gameActive = false;
@@ -57,6 +57,26 @@ function buildNewLevel() {
   // Spawn player and puck
   initPlayer(levelData.spawnWorld, levelGroup);
   initPuck(levelData.spawnWorld, levelGroup);
+
+  // Clear old defenders
+  defenders.forEach(d => {
+    if (d.mesh) levelGroup.remove(d.mesh);
+  });
+  defenders.length = 0;
+
+  // Spawn defenders with progressive difficulty
+  // Start with 1 defender, add 1 more every 2 rooms
+  const numDefenders = Math.floor(room / 2) + 1;
+  const maxDefenders = 4; // Cap at 4 to avoid overwhelming difficulty
+
+  for (let i = 0; i < Math.min(numDefenders, maxDefenders); i++) {
+    // Random position avoiding edges
+    const x = (Math.random() - 0.5) * 35;
+    const z = (Math.random() - 0.5) * 25;
+
+    const defender = new Defender(x, z, levelGroup, player, puck, goalPos);
+    defenders.push(defender);
+  }
 
   // Update HUD
   updateHUD(score, health, room);
@@ -125,9 +145,9 @@ function animate() {
     // Update puck
     updatePuck(dt, player, linemates, onGoal, goalPos);
 
-    // Update entities (empty for now)
+    // Update entities
     for (const defender of defenders) {
-      defender.update(dt, { player, puck, defenders, linemates });
+      defender.update(dt, defenders);
     }
 
     for (const linemate of linemates) {

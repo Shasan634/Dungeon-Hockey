@@ -20,6 +20,29 @@ dungeon-hockey/
     level.js         # 3D level building
 ```
 
+## 🎮 How to Play
+
+**Quick Start:**
+```bash
+npm install
+npm run dev
+```
+Open **http://localhost:5175** and start playing!
+
+**Controls:**
+- **WASD** - Move player
+- **SPACE** - Shoot puck
+- **SHIFT** - Pass
+
+**Objective:** Shoot the puck into the green goal zone to advance to the next room.
+
+**Watch out for defenders!** They change color based on behavior:
+- 🔴 **Red** = Patrolling (safe)
+- 🟠 **Orange** = Chasing puck
+- 💜 **Magenta** = Blocking goal (highest threat!)
+
+See [READY-TO-PLAY.md](READY-TO-PLAY.md) for detailed gameplay guide.
+
 ## How to Run
 
 1. Install dependencies:
@@ -97,22 +120,46 @@ Room-based dungeon generation algorithm:
 
 This is NOT a maze generator (no depth-first backtracking) - it creates actual wide rooms connected by corridors, as required.
 
-## Next Steps - Phase 3
+### Phase 3: Jump Point Search (Pathfinding) ✅
 
-When you're ready to implement pathfinding and AI, start with:
+**File**: [src/jps.js](src/jps.js)
 
-**File to open first**: [src/entities.js](src/entities.js)
+Jump Point Search pathfinding - an optimization of A* for uniform-cost grids:
+- Identifies "jump points" where search direction must change
+- Prunes symmetric paths in open rooms (common in our dungeon generator)
+- Forces neighbour detection creates path asymmetry around walls
+- Dramatically reduces nodes expanded vs. standard A*
 
-The `Defender` and `Linemate` classes are ready to be filled in with:
-- **Phase 3**: Jump Point Search pathfinding for Defenders
-- **Phase 4**: Behaviour tree for Defender decision-making
-- **Phase 5**: Collision avoidance for all entities
+**Why JPS here**: Our wide open rooms create many equivalent paths. A* would expand every tile along all symmetric paths. JPS skips to jump points, expanding 5-10x fewer nodes.
+
+**Testing**: See [PHASE3-JPS.md](PHASE3-JPS.md) for detailed testing guide and verification steps.
+
+### Phase 4: Behaviour Tree (Decision Making) ✅
+
+**File**: [src/entities.js](src/entities.js)
+
+Priority selector behaviour tree for Defender AI:
+- **BLOCK** (Priority 1): Guard goal when player nearby - magenta color, 1.4x speed
+- **CHASE** (Priority 2): Pursue puck when in range - orange color, 1.15x speed
+- **PATROL** (Priority 3): Wander randomly (default) - red color, 1.0x speed
+
+**Why priority selector**: Clear hierarchy ensures exactly one active behavior. BLOCK overrides CHASE because preventing goals is more critical than chasing the puck.
+
+**Visual feedback**: Defender body and eye change color in real-time based on active state.
+
+**Testing**: See [PHASE4-BEHAVIOUR-TREE.md](PHASE4-BEHAVIOUR-TREE.md) for state testing and tuning guide.
+
+## Next Steps - Phase 5
+
+**Collision Avoidance Steering**
+
+The behaviour tree provides high-level decisions. Next steps:
+- **Phase 5**: Collision avoidance for smooth defender movement
 - **Phase 6**: Flocking behavior for Linemates
 
-Each entity has access to:
-- `this.x, this.z` - position
-- `this.radius` - collision radius
-- `update(dt, all)` - called every frame with delta time and references to other entities
+**File to modify**: [src/entities.js](src/entities.js:100) - TODO comment is already in place
+
+The behaviour tree will continue to set goals (CHASE/BLOCK/PATROL), and collision avoidance will adjust velocity to avoid obstacles while pursuing those goals.
 
 ## Technical Notes
 
