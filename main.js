@@ -93,6 +93,15 @@ window.addEventListener('keydown', (e) => {
     const holder = puck.holder;
     if (holder) {
       shoot(holder, puck);
+      // If the player shot, assign control to the linemate nearest the puck so
+      // the user always has a linemate to drive after releasing possession.
+      if (holder === player && linemates.length > 0) {
+        controlledLinemate = linemates.reduce((best, lm) => {
+          const dBest = Math.hypot(best.x - puck.x, best.z - puck.z);
+          const dLm   = Math.hypot(lm.x  - puck.x, lm.z  - puck.z);
+          return dLm < dBest ? lm : best;
+        });
+      }
     }
   }
 
@@ -101,6 +110,18 @@ window.addEventListener('keydown', (e) => {
     const holder = puck.holder;
     if (holder) {
       const others = [player, ...linemates].filter(e => e !== holder);
+      // If the player is passing, pre-assign control to the intended receiver
+      // (nearest entity in others) so WASD follows the pass immediately.
+      if (holder === player && linemates.length > 0) {
+        const linematePeers = others.filter(e => linemates.includes(e));
+        if (linematePeers.length > 0) {
+          controlledLinemate = linematePeers.reduce((best, lm) => {
+            const dBest = Math.hypot(best.x - puck.x, best.z - puck.z);
+            const dLm   = Math.hypot(lm.x  - puck.x, lm.z  - puck.z);
+            return dLm < dBest ? lm : best;
+          });
+        }
+      }
       pass(holder, puck, others);
     }
   }
@@ -279,10 +300,11 @@ function animate() {
       if (dist < candidate.radius + puck.radius + 0.15) {
         puck.holder = candidate;
         if (linemates.includes(candidate)) {
-          controlledLinemate = candidate; // user now drives this linemate
-        } else {
-          controlledLinemate = null;      // player picked it up
+          // A linemate picked up — switch control to them
+          controlledLinemate = candidate;
         }
+        // Player picking up does NOT clear controlledLinemate:
+        // the user stays assigned to the same linemate until another linemate grabs it
       }
     }
 
@@ -294,7 +316,7 @@ function animate() {
       player.highlightRing.visible = (puck.holder === player);
     }
     for (const lm of linemates) {
-      lm.setHighlight(lm === controlledLinemate);
+      lm.setHighlight(lm === controlledLinemate && puck.holder !== player);
     }
 
     // ── Player seek routing ────────────────────────────────────────────────
@@ -350,13 +372,12 @@ function animate() {
       }
     }
 
-    // controlledLinemate always gets WASD — even after shooting so the user
-    // can reposition. All others run _updateAutonomous:
-    //   • Carrier linemate exists → lead/trail formation
-    //   • Player has puck → lead/trail formation around player
-    //   • Puck is free → seek the puck
+    // controlledLinemate gets WASD except when the player holds the puck
+    // (player holding puck → player is WASD-driven, linemates go autonomous).
+    // After shooting, controlledLinemate keeps WASD so the user can reposition.
     for (const lm of linemates) {
-      lm.update(dt, { player, linemates, keys: lm === controlledLinemate ? keys : null, puck });
+      const getsWASD = lm === controlledLinemate && puck.holder !== player;
+      lm.update(dt, { player, linemates, keys: getsWASD ? keys : null, puck });
     }
   }
 

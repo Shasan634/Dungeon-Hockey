@@ -438,6 +438,31 @@ export class Linemate {
     this.highlightRing.visible = false;
     this.mesh.add(this.highlightRing);
 
+    // Helmet — identical to player
+    const helmetGeometry = new THREE.SphereGeometry(0.25, 12, 12);
+    const helmetMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00aadd,
+      roughness: 0.4,
+      metalness: 0.6
+    });
+    const helmet = new THREE.Mesh(helmetGeometry, helmetMaterial);
+    helmet.position.set(0, 0.5, 0);
+    this.mesh.add(helmet);
+
+    // Visor — identical to player
+    const visorGeometry = new THREE.PlaneGeometry(0.3, 0.15);
+    const visorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0088ff,
+      emissive: 0x0044ff,
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.6
+    });
+    const visor = new THREE.Mesh(visorGeometry, visorMaterial);
+    visor.position.set(0.15, 0.5, 0);
+    visor.rotation.y = Math.PI / 2;
+    this.mesh.add(visor);
+
     levelGroup.add(this.mesh);
   }
 
@@ -540,12 +565,9 @@ export class Linemate {
     const carrier = linemates.find(lm => lm !== this && lm === puck.holder);
 
     if (carrier) {
-      // ── Possession mode: position relative to carrier ──────────────────
-      // Among the non-carrier linemates, assign roles by dot product with
-      // the carrier's facing direction: the one more "in front" leads.
+      // ── A linemate carries the puck: lead/trail around that linemate ───
       const others = linemates.filter(lm => lm !== carrier);
 
-      // Dot product of (linemate → carrier) projected onto carrier facing
       const myDot   = (this.x - carrier.x) * carrier.fx + (this.z - carrier.z) * carrier.fz;
       const peer    = others.find(lm => lm !== this);
       const peerDot = peer
@@ -562,10 +584,25 @@ export class Linemate {
         targetX = carrier.x - carrier.fx * TRAIL_DIST;
         targetZ = carrier.z - carrier.fz * TRAIL_DIST;
       }
+    } else if (puck.holder === player) {
+      // ── Player carries the puck: lead/trail around the player ─────────
+      const peer    = linemates.find(lm => lm !== this);
+      const myDot   = (this.x - player.x) * player.fx + (this.z - player.z) * player.fz;
+      const peerDot = peer
+        ? (peer.x - player.x) * player.fx + (peer.z - player.z) * player.fz
+        : -Infinity;
+
+      const isLead = myDot >= peerDot;
+
+      if (isLead) {
+        targetX = player.x + player.fx * LEAD_DIST;
+        targetZ = player.z + player.fz * LEAD_DIST;
+      } else {
+        targetX = player.x - player.fx * TRAIL_DIST;
+        targetZ = player.z - player.fz * TRAIL_DIST;
+      }
     } else {
-      // ── No linemate has the puck — seek the puck ──────────────────────
-      // Covers both free-puck and player-has-puck cases. Linemates converge
-      // on the puck so they're in position to receive a pass or pick it up.
+      // ── Puck is free — seek it directly ───────────────────────────────
       targetX = puck.x;
       targetZ = puck.z;
     }

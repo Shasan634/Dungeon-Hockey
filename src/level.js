@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { generateDungeon, getSpawnRoom, getGoalRoom } from './dungeon.js';
-import { tilemap, COLS, ROWS, TILE, tileToWorld } from './tilemap.js';
+import { tilemap, COLS, ROWS, TILE, tileToWorld, torchObstacles } from './tilemap.js';
 
 /**
  * Helper: Build goal with posts, crossbar, net, and animated glow
@@ -53,6 +53,9 @@ function _buildGoal(levelGroup, goalPos) {
 function _buildTorches(levelGroup, rooms) {
   const torchFlames = [];
 
+  // Reset obstacle list for this level
+  torchObstacles.length = 0;
+
   // Build torches in intermediate rooms (skip first and last)
   for (let i = 1; i < rooms.length - 1; i++) {
     const room = rooms[i];
@@ -76,6 +79,10 @@ function _buildTorches(levelGroup, rooms) {
     const light = new THREE.PointLight(torchColor, 2, 10);
     light.position.set(roomCenter.x, 1.5, roomCenter.z);
     levelGroup.add(light);
+
+    // Register as a solid circular obstacle — radius matches the ring outer edge
+    // so entities are blocked right at the visible blue ring boundary
+    torchObstacles.push({ x: roomCenter.x, z: roomCenter.z, radius: 1.4 });
 
     // Store for animation
     torchFlames.push({

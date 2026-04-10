@@ -8,6 +8,11 @@ export const TILE = 2.0; // world units per tile
 // 2D array: 0 = floor, 1 = wall
 export const tilemap = Array(ROWS).fill(null).map(() => Array(COLS).fill(1));
 
+// Circular obstacles placed in the world (torches, pillars, etc.)
+// Populated by level.js at build time; consumed by resolveWalls.
+// Each entry: { x, z, radius }
+export const torchObstacles = [];
+
 /**
  * Converts tile coordinates to world position
  * @param {number} r - row index
@@ -148,6 +153,27 @@ export function resolveWalls(entity, isPuck = false) {
             entity.vz = Math.abs(entity.vz) * (isPuck ? 0.5 : 1);
           }
         }
+      }
+    }
+  }
+
+  // Torch obstacle resolution (circle vs circle)
+  for (const obs of torchObstacles) {
+    const dx = entity.x - obs.x;
+    const dz = entity.z - obs.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const minDist = entity.radius + obs.radius;
+    if (dist < minDist && dist > 1e-4) {
+      const nx = dx / dist;
+      const nz = dz / dist;
+      const overlap = minDist - dist;
+      entity.x += nx * overlap;
+      entity.z += nz * overlap;
+      // Reflect and optionally dampen velocity
+      const dot = entity.vx * nx + entity.vz * nz;
+      if (dot < 0) {
+        entity.vx -= 2 * dot * nx * (isPuck ? 0.5 : 1);
+        entity.vz -= 2 * dot * nz * (isPuck ? 0.5 : 1);
       }
     }
   }
