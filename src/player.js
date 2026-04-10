@@ -10,13 +10,14 @@ export const player = {
   vx: 0,
   vz: 0,
   radius: 0.4,
-  speed: 5.2,
-  fx: 1,         // facing direction x
-  fz: 0,         // facing direction z
-  angle: 0,      // facing angle in radians
-  inv: 0,        // invincibility timer
+  speed: 5.5,              // ← CONFLICT: HEAD had 5.2, incoming had 5.5 — using 5.5 for now
+  fx: 1,                   // facing direction x
+  fz: 0,                   // facing direction z
+  angle: 0,                // facing angle in radians
+  inv: 0,                  // invincibility timer
   mesh: null,
-  highlightRing: null  // yellow ring shown when this player holds the puck
+  highlightRing: null,     // yellow ring shown when this player holds the puck (HEAD)
+  skateTrails: []          // skate trail effect meshes (incoming)
 };
 
 /**
@@ -50,7 +51,7 @@ export function initPlayer(spawnWorld, levelGroup) {
   light.position.set(0, 0.4, 0);
   player.mesh.add(light);
 
-  // Yellow highlight ring — shown when this player holds the puck
+  // Yellow highlight ring — shown when this player holds the puck (HEAD)
   const ringMat = new THREE.MeshStandardMaterial({
     color: 0xffee00,
     emissive: 0xffee00,
@@ -65,8 +66,46 @@ export function initPlayer(spawnWorld, levelGroup) {
   player.highlightRing.visible = false;
   player.mesh.add(player.highlightRing);
 
+  // Helmet (incoming)
+  const helmetGeometry = new THREE.SphereGeometry(0.25, 12, 12);
+  const helmetMaterial = new THREE.MeshStandardMaterial({
+    color: 0x00aadd,
+    roughness: 0.4,
+    metalness: 0.6
+  });
+  const helmet = new THREE.Mesh(helmetGeometry, helmetMaterial);
+  helmet.position.set(0, 0.5, 0);
+  player.mesh.add(helmet);
+
+  // Visor (incoming)
+  const visorGeometry = new THREE.PlaneGeometry(0.3, 0.15);
+  const visorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0088ff,
+    emissive: 0x0044ff,
+    emissiveIntensity: 0.3,
+    transparent: true,
+    opacity: 0.6
+  });
+  const visor = new THREE.Mesh(visorGeometry, visorMaterial);
+  visor.position.set(0.15, 0.5, 0);
+  visor.rotation.y = Math.PI / 2;
+  player.mesh.add(visor);
+
+  // Clear skate trails (incoming)
+  player.skateTrails = [];
+
   levelGroup.add(player.mesh);
 }
+
+// Skate trail cooldown timer and shared geometry/material (incoming)
+let trailCooldown = 0;
+const sharedTrailGeometry = new THREE.PlaneGeometry(0.4, 0.2);
+const sharedTrailMaterial = new THREE.MeshBasicMaterial({
+  color: 0x00ddff,
+  transparent: true,
+  opacity: 0.6,
+  side: THREE.DoubleSide
+});
 
 /**
  * Updates player position, handles input or autonomous seeking, collision, and damage.
@@ -76,9 +115,10 @@ export function initPlayer(spawnWorld, levelGroup) {
  * @param {Function} onDamage - callback when player takes damage
  * @param {{x: number, z: number}|null} seekTarget - when non-null, player auto-moves
  *   toward this position instead of reading keys (same behaviour as linemate seeking)
+ * @param {THREE.Group|null} levelGroup - group to add skate trails to (incoming)
  * Mutates: player object
  */
-export function updatePlayer(dt, keys, defenders, onDamage, seekTarget = null) {
+export function updatePlayer(dt, keys, seekTarget = null, levelGroup = null) {
   // Invincibility timer + flash
   if (player.inv > 0) {
     player.inv -= dt;
@@ -121,22 +161,34 @@ export function updatePlayer(dt, keys, defenders, onDamage, seekTarget = null) {
   player.z += player.vz * dt;
   resolveWalls(player, false);
 
-  // Defender collision → damage
-  for (const defender of defenders) {
-    const dx = player.x - defender.x;
-    const dz = player.z - defender.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist < player.radius + (defender.radius || 0.4)) {
-      if (player.inv <= 0) {
-        onDamage();
-        player.inv = 2.0;
-      }
-    }
-  }
-
   // ── Mesh ─────────────────────────────────────────────────────────────────
   if (player.mesh) {
     player.mesh.position.set(player.x, 0.26, player.z);
     player.mesh.rotation.y = player.angle;
+  }
+
+  // ── Skate trails (incoming) ───────────────────────────────────────────────
+  const speed = Math.sqrt(player.vx * player.vx + player.vz * player.vz);
+  trailCooldown -= dt;
+
+  if (speed > 2.0 && trailCooldown <= 0 && levelGroup && player.skateTrails.length < 10) {
+    trailCooldown = 0.2;
+    const trailMaterial = sharedTrailMaterial.clone();
+    const trail = new THREE.Mesh(sharedTrailGeometry, trailMaterial);
+    trail.rotation.x = -Math.PI / 2;
+    trail.position.set(player.x, 0.01, player.z);
+    levelGroup.add(trail);
+    player.skateTrails.push({ mesh: trail, life: 0.25 });
+  }
+
+  for (let i = player.skateTrails.length - 1; i >= 0; i--) {
+    const trail = player.skateTrails[i];
+    trail.life -= dt;
+    if (trail.life <= 0) {
+      if (levelGroup && trail.mesh.parent) levelGroup.remove(trail.mesh);
+      player.skateTrails.splice(i, 1);
+    } else {
+      trail.mesh.material.opacity = (trail.life / 0.25) * 0.6;
+    }
   }
 }

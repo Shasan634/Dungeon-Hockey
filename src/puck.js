@@ -3,6 +3,15 @@
 
 import * as THREE from 'three';
 import { resolveWalls } from './tilemap.js';
+import { playWallHit, playShoot, playPass } from './audio.js';
+
+// Shared geometry and material for puck trails (performance optimization)
+const sharedPuckTrailGeometry = new THREE.SphereGeometry(0.15, 6, 6);
+const sharedPuckTrailMaterial = new THREE.MeshBasicMaterial({
+  color: 0xff6600,
+  transparent: true,
+  opacity: 0.7
+});
 
 export const puck = {
   x: 0,
@@ -14,7 +23,8 @@ export const puck = {
   mesh: null,
   // Possession state
   holder: null,          // entity currently carrying the puck (player or linemate)
-  releaseCooldown: 0     // seconds after shoot/pass before shooter can re-grab
+  releaseCooldown: 0,    // seconds after shoot/pass before shooter can re-grab
+  trails: []             // Array of {mesh, life} for trail effect
 };
 
 /**
@@ -46,6 +56,9 @@ export function initPuck(spawnWorld, levelGroup) {
   light.position.set(0, 0.3, 0);
   puck.mesh.add(light);
 
+  // Clear old trails
+  puck.trails = [];
+
   levelGroup.add(puck.mesh);
 }
 
@@ -56,9 +69,10 @@ export function initPuck(spawnWorld, levelGroup) {
  * @param {Array} linemates - array of linemate entities
  * @param {Function} onGoal - callback when puck reaches goal
  * @param {{x: number, z: number}} goalPos - goal position in world coordinates
+ * @param {THREE.Group} levelGroup - group to add trail meshes to
  * Mutates: puck object
  */
-export function updatePuck(dt, player, linemates, onGoal, goalPos) {
+export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
   // Tick release cooldown so the shooter can eventually re-grab
   if (puck.releaseCooldown > 0) puck.releaseCooldown -= dt;
 
@@ -93,8 +107,15 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos) {
   if (Math.abs(puck.vx) < 0.01) puck.vx = 0;
   if (Math.abs(puck.vz) < 0.01) puck.vz = 0;
 
-  // Wall collision (with velocity dampening)
+  // Wall collision (with velocity dampening) - track speed before/after for audio
+  const speedBefore = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
   resolveWalls(puck, true);
+  const speedAfter = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
+
+  // Play wall hit sound if puck bounced (significant speed drop)
+  if (speedBefore > 2.0 && speedAfter < speedBefore * 0.8) {
+    playWallHit(speedBefore);
+  }
 
   // Player collision - deflect free puck
   {
@@ -137,7 +158,39 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos) {
   const goalDist = Math.hypot(puck.x - goalPos.x, puck.z - goalPos.z);
   if (goalDist < 2.2) onGoal();
 
-  if (puck.mesh) puck.mesh.position.set(puck.x, 0.1, puck.z);
+  // Update mesh position
+  if (puck.mesh) {
+    puck.mesh.position.set(puck.x, 0.1, puck.z);
+  }
+
+  // Spawn trail spheres when puck is moving fast
+  const speed = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
+
+  if (speed > 4.0 && levelGroup && puck.trails.length < 3) {
+    const trailMaterial = sharedPuckTrailMaterial.clone();
+    const trail = new THREE.Mesh(sharedPuckTrailGeometry, trailMaterial);
+    trail.position.set(puck.x, 0.1, puck.z);
+    levelGroup.add(trail);
+    puck.trails.push({ mesh: trail, life: 0.15 });
+  }
+
+  // Update and fade trail spheres
+  for (let i = puck.trails.length - 1; i >= 0; i--) {
+    const trail = puck.trails[i];
+    trail.life -= dt;
+
+    if (trail.life <= 0) {
+      if (levelGroup && trail.mesh.parent) {
+        levelGroup.remove(trail.mesh);
+      }
+      puck.trails.splice(i, 1);
+    } else {
+      const fadeAmount = trail.life / 0.15;
+      trail.mesh.material.opacity = fadeAmount * 0.7;
+      const scale = 0.5 + fadeAmount * 0.5;
+      trail.mesh.scale.set(scale, scale, scale);
+    }
+  }
 }
 
 /**
@@ -154,6 +207,7 @@ export function shoot(shooter, puck) {
   const speed = 13;
   puck.vx = shooter.fx * speed;
   puck.vz = shooter.fz * speed;
+  playShoot(); // Audio feedback
 }
 
 /**
@@ -172,6 +226,8 @@ export function pass(shooter, puck, others) {
     shoot(shooter, puck);
     return;
   }
+
+  playPass(); // Audio feedback
 
   // Find nearest pass target to the shooter
   let nearest = null;

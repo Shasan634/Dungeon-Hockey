@@ -6,16 +6,27 @@
  * @param {number} score - current score
  * @param {number} health - current health (0-100)
  * @param {number} room - current room number
- * Mutates: DOM elements #score, #health, #room
+ * Mutates: DOM elements #score, #health-icons, #room
  */
 export function updateHUD(score, health, room) {
   const scoreEl = document.getElementById('score');
-  const healthEl = document.getElementById('health');
+  const healthIconsEl = document.getElementById('health-icons');
   const roomEl = document.getElementById('room');
 
   if (scoreEl) scoreEl.textContent = score;
-  if (healthEl) healthEl.textContent = health;
   if (roomEl) roomEl.textContent = room;
+
+  // Render health as puck icons (each puck = 10 health)
+  if (healthIconsEl) {
+    const numPucks = Math.ceil(health / 10);
+    healthIconsEl.innerHTML = '';
+
+    for (let i = 0; i < numPucks; i++) {
+      const puck = document.createElement('div');
+      puck.className = 'health-puck';
+      healthIconsEl.appendChild(puck);
+    }
+  }
 }
 
 /**
@@ -36,4 +47,18 @@ export function flash(message, good = true) {
   setTimeout(() => {
     flashEl.style.opacity = '0';
   }, 1200);
+}
+
+/**
+ * Displays full-screen red overlay flash when player takes damage
+ * Mutates: DOM element #overlay
+ */
+export function hitFlash() {
+  const overlay = document.getElementById('overlay');
+  if (!overlay) return;
+
+  overlay.style.background = 'rgba(255, 0, 0, 0.4)';
+  setTimeout(() => {
+    overlay.style.background = 'rgba(255, 0, 0, 0)';
+  }, 150);
 }

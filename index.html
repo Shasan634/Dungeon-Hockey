@@ -25,20 +25,44 @@
       transform: translateX(-50%);
       display: flex;
       gap: 40px;
-      font-size: 18px;
+      font-size: 20px;
       z-index: 100;
-      text-shadow: 0 0 10px #0055bb;
+      background: rgba(5, 20, 30, 0.85);
+      padding: 15px 30px;
+      border-radius: 8px;
+      border: 2px solid rgba(0, 221, 255, 0.3);
+      box-shadow: 0 0 20px rgba(0, 100, 150, 0.4);
     }
 
     #hud > div {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
 
     #hud label {
       color: #66aacc;
       font-weight: bold;
+      text-shadow: 0 0 8px #0055bb;
+    }
+
+    #hud span {
+      color: #00ddff;
+      font-weight: bold;
+      text-shadow: 0 0 12px #00aaff;
+    }
+
+    #health-icons {
+      display: flex;
+      gap: 4px;
+    }
+
+    .health-puck {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #00ffcc, #0088aa);
+      box-shadow: 0 0 8px rgba(0, 255, 200, 0.6);
     }
 
     #controls {
@@ -76,6 +100,71 @@
       text-shadow: 0 0 20px #ff3333, 0 0 40px #ff3333;
     }
 
+    #overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(255, 0, 0, 0);
+      pointer-events: none;
+      z-index: 150;
+      transition: background 0.1s ease-out;
+    }
+
+    #start-screen, #game-over-screen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(5, 15, 25, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 300;
+      text-align: center;
+    }
+
+    #start-screen h1, #game-over-screen h1 {
+      font-size: 72px;
+      color: #00ddff;
+      text-shadow: 0 0 30px #00aaff, 0 0 60px #0088cc;
+      margin-bottom: 20px;
+      letter-spacing: 4px;
+    }
+
+    #start-screen p, #game-over-screen p {
+      font-size: 24px;
+      color: #66aacc;
+      margin: 10px 0;
+      text-shadow: 0 0 10px #0055bb;
+    }
+
+    #start-screen .subtitle {
+      font-size: 18px;
+      color: #4488aa;
+      margin-top: 40px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    #game-over-screen .final-score {
+      font-size: 48px;
+      color: #00ff88;
+      text-shadow: 0 0 20px #00ff88;
+      margin: 20px 0;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1.0; }
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
     canvas {
       display: block;
       width: 100vw;
@@ -91,7 +180,7 @@
     </div>
     <div>
       <label>HEALTH:</label>
-      <span id="health">100</span>
+      <div id="health-icons"></div>
     </div>
     <div>
       <label>ROOM:</label>
@@ -104,6 +193,21 @@
   </div>
 
   <div id="flash"></div>
+  <div id="overlay"></div>
+
+  <div id="start-screen">
+    <h1>DUNGEON HOCKEY</h1>
+    <p>Score goals to advance through the dungeon</p>
+    <p>Avoid defenders or lose health</p>
+    <p class="subtitle">Press any key to start</p>
+  </div>
+
+  <div id="game-over-screen" class="hidden">
+    <h1>GAME OVER</h1>
+    <p class="final-score">Final Score: <span id="final-score">0</span></p>
+    <p>Rooms Cleared: <span id="final-room">0</span></p>
+    <p class="subtitle">Press any key to restart</p>
+  </div>
 
   <script type="module" src="./main.js"></script>
 </body>

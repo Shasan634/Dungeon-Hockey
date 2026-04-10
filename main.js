@@ -7,22 +7,31 @@ import { buildLevel } from './src/level.js';
 import { player, initPlayer, updatePlayer } from './src/player.js';
 import { puck, initPuck, updatePuck, shoot, pass } from './src/puck.js';
 import { Defender, Linemate } from './src/entities.js';
-import { updateHUD, flash } from './src/hud.js';
+import { updateHUD, flash, hitFlash } from './src/hud.js';
+import { initAudio, resumeAudio, playGoal, playHit, startAmbient } from './src/audio.js';
 
 // Game state
 let gameActive = false;
+let gameStarted = false;
+let isGameOver = false;
 let score = 0;
 let health = 100;
 let room = 1;
 let goalPos = { x: 0, z: 0 };
+let torchFlames = [];
+let goalGlow = null;
 
 // Entities (empty for now - will be filled in Phase 3-6)
 const defenders = [];
 const linemates = [];
 
-// The entity (player or linemate) currently driven by WASD.
-// Updated every frame to whichever is closest to the puck.
-let controlled = player;
+// Invincibility timer for whoever holds the puck — prevents multi-hits per second
+let holderInvTimer = 0;
+
+// Which linemate the user is currently driving with WASD.
+// Set when a linemate picks up the puck; persists after shooting so the
+// user stays in control of the same linemate until another entity picks up.
+let controlledLinemate = null;
 
 
 // Input state
@@ -55,19 +64,44 @@ window.addEventListener('keydown', (e) => {
   const key = e.key.toLowerCase();
   if (key in keys) keys[key] = true;
 
-  if (!gameActive) return;
-
-  // Shoot — Space. Uses puck.holder directly so it always targets the carrier.
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (puck.holder) shoot(puck.holder, puck);
+  // Start game on first keypress
+  if (!gameStarted) {
+    gameStarted = true;
+    initAudio();
+    startAmbient();
+    const startScreen = document.getElementById('start-screen');
+    if (startScreen) startScreen.classList.add('hidden');
   }
 
-  // Pass — E. Sends puck from the current holder to the nearest other entity.
+  // Restart after game over — any key
+  if (isGameOver) {
+    isGameOver = false;
+    health = 100;
+    score = 0;
+    room = 1;
+    const gameOverScreen = document.getElementById('game-over-screen');
+    if (gameOverScreen) gameOverScreen.classList.add('hidden');
+    buildNewLevel();
+    return;
+  }
+
+  if (!gameActive) return;
+
+  // Shoot — Space
+  if (e.code === 'Space') {
+    e.preventDefault();
+    const holder = puck.holder;
+    if (holder) {
+      shoot(holder, puck);
+    }
+  }
+
+  // Pass — E
   if (key === 'e') {
-    if (puck.holder) {
-      const others = [player, ...linemates].filter(t => t !== puck.holder);
-      pass(puck.holder, puck, others);
+    const holder = puck.holder;
+    if (holder) {
+      const others = [player, ...linemates].filter(e => e !== holder);
+      pass(holder, puck, others);
     }
   }
 });
@@ -83,10 +117,33 @@ window.addEventListener('keyup', (e) => {
  */
 function buildNewLevel() {
   gameActive = false;
+  controlledLinemate = null;
+
+  // Clean up old skate trails
+  if (player.skateTrails) {
+    for (const trail of player.skateTrails) {
+      if (trail.mesh && trail.mesh.parent) {
+        levelGroup.remove(trail.mesh);
+      }
+    }
+    player.skateTrails = [];
+  }
+
+  // Clean up old puck trails
+  if (puck.trails) {
+    for (const trail of puck.trails) {
+      if (trail.mesh && trail.mesh.parent) {
+        levelGroup.remove(trail.mesh);
+      }
+    }
+    puck.trails = [];
+  }
 
   // Build level geometry and get spawn/goal positions
   const levelData = buildLevel(scene, levelGroup);
   goalPos = levelData.goalPos;
+  torchFlames = levelData.torchFlames;
+  goalGlow = levelData.goalGlow;
 
   // Spawn player and puck
   initPlayer(levelData.spawnWorld, levelGroup);
@@ -138,17 +195,22 @@ function onDamage() {
   if (health < 0) health = 0;
   updateHUD(score, health, room);
   flash('HIT!', false);
+  hitFlash(); // Red screen flash
+  playHit(); // Audio feedback
 
   if (health <= 0) {
     gameActive = false;
+    isGameOver = true;
     flash('GAME OVER', false);
-    setTimeout(() => {
-      // Reset game
-      score = 0;
-      health = 100;
-      room = 1;
-      buildNewLevel();
-    }, 2000);
+
+    // Show game over screen
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreEl = document.getElementById('final-score');
+    const finalRoomEl = document.getElementById('final-room');
+
+    if (finalScoreEl) finalScoreEl.textContent = score;
+    if (finalRoomEl) finalRoomEl.textContent = room - 1;
+    if (gameOverScreen) gameOverScreen.classList.remove('hidden');
   }
 }
 
@@ -164,6 +226,7 @@ function onGoal() {
   room += 1;
 
   flash('GOAL!', true);
+  playGoal(); // Audio feedback
   updateHUD(score, health, room);
 
   // Build next level after delay
@@ -182,60 +245,118 @@ function animate() {
   let dt = clock.getDelta();
   if (dt > 0.05) dt = 0.05;
 
+  const t = clock.getElapsedTime();
+
+  // Resume audio if suspended (tab backgrounded)
+  resumeAudio();
+
+  // Animate torch flames (always, even when game inactive)
+  for (let i = 0; i < torchFlames.length; i++) {
+    const torch = torchFlames[i];
+    const flicker = 2.0 + Math.sin(t * 7.3 + torch.offset) * 0.6;
+    torch.light.intensity = flicker;
+
+    const yOffset = Math.sin(t * 5.0 + torch.offset) * 0.08;
+    torch.mesh.position.y = torch.baseY + yOffset;
+
+    const scaleFlicker = 1.0 + Math.sin(t * 6.5 + torch.offset) * 0.12;
+    torch.mesh.scale.set(scaleFlicker, scaleFlicker, scaleFlicker);
+  }
+
+  // Animate goal glow (always, even when game inactive)
+  if (goalGlow) {
+    const pulse = 3.0 + Math.sin(t * 2.5) * 0.8;
+    goalGlow.intensity = pulse;
+  }
+
   if (gameActive) {
-    // ── Pickup ───────────────────────────────────────────────────────────
-    // The entity closest to the puck is the only one that can pick it up.
-    // This keeps `controlled` purely for pickup arbitration — it is NOT used
-    // to route WASD (that is done by puck.holder below).
+    // ── Pickup arbitration ─────────────────────────────────────────────────
+    // The entity closest to the free puck auto-picks it up.
+    // Whoever picks up updates controlledLinemate so WASD follows possession.
     if (puck.holder === null && puck.releaseCooldown <= 0) {
-      controlled = findControlled();
-      const pickupR = controlled.radius + puck.radius + 0.5;
-      if (Math.hypot(controlled.x - puck.x, controlled.z - puck.z) < pickupR) {
-        puck.holder = controlled;
+      const candidate = findControlled();
+      const dist = Math.hypot(candidate.x - puck.x, candidate.z - puck.z);
+      if (dist < candidate.radius + puck.radius + 0.15) {
+        puck.holder = candidate;
+        if (linemates.includes(candidate)) {
+          controlledLinemate = candidate; // user now drives this linemate
+        } else {
+          controlledLinemate = null;      // player picked it up
+        }
       }
     }
 
-    // ── Highlights ───────────────────────────────────────────────────────
-    // Yellow ring on whoever holds the puck (player or linemate).
-    if (player.highlightRing) player.highlightRing.visible = (puck.holder === player);
+    // ── Highlight rings ────────────────────────────────────────────────────
+    // Player ring: lit when player holds puck.
+    // Linemate ring: lit on the linemate the user is currently controlling
+    // (persists after shooting so the user always sees "their" linemate).
+    if (player.highlightRing) {
+      player.highlightRing.visible = (puck.holder === player);
+    }
     for (const lm of linemates) {
-      lm.setHighlight(lm === puck.holder);
+      lm.setHighlight(lm === controlledLinemate);
     }
 
-    // ── WASD / seek routing for player ───────────────────────────────────
-    // • Player holds puck  → WASD
-    // • No one holds puck  → player sprints to puck (same as linemates)
-    // • Linemate holds puck→ player trails behind the carrier (pass lane)
+    // ── Player seek routing ────────────────────────────────────────────────
+    // Player is WASD-driven only when it holds the puck.
+    // Otherwise it autonomously seeks the puck (or trails behind a carrying linemate).
     let playerSeekTarget = null;
     if (puck.holder !== player) {
-      if (!puck.holder) {
-        playerSeekTarget = { x: puck.x, z: puck.z };
-      } else {
-        // Carrier is a linemate; the other linemate takes lead automatically.
-        // Player always trails so there is a backward pass lane.
+      if (puck.holder && linemates.includes(puck.holder)) {
+        // A linemate has the puck — player trails behind the carrier
         const carrier = puck.holder;
+        const TRAIL_DIST = 2.5;
         playerSeekTarget = {
-          x: carrier.x - carrier.fx * 3.0,
-          z: carrier.z - carrier.fz * 3.0
+          x: carrier.x - carrier.fx * TRAIL_DIST,
+          z: carrier.z - carrier.fz * TRAIL_DIST
         };
+      } else {
+        // Puck is free — seek the puck
+        playerSeekTarget = { x: puck.x, z: puck.z };
       }
     }
-    updatePlayer(dt, keys, defenders, onDamage, playerSeekTarget);
+
+    // Update player
+    updatePlayer(dt, keys, playerSeekTarget, levelGroup);
 
     // Update puck
-    updatePuck(dt, player, linemates, onGoal, goalPos);
+    updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup);
 
     // Update defenders
     for (const defender of defenders) {
       defender.update(dt, defenders);
     }
 
-    // A linemate only gets WASD when it is the puck holder.
-    // All others receive null → _updateAutonomous runs:
-    //   • No carrier in linemates → seek the puck
-    //   • Another linemate is carrier → take lead or trail position
+    // ── Defender contact: puck holder takes damage ────────────────────────
+    if (holderInvTimer > 0) holderInvTimer -= dt;
+
+    const holder = puck.holder;
+    if (holder && holderInvTimer <= 0) {
+      for (const defender of defenders) {
+        const dx = holder.x - defender.x;
+        const dz = holder.z - defender.z;
+        if (Math.hypot(dx, dz) < holder.radius + defender.radius) {
+          onDamage();
+          holderInvTimer = 2.0;
+          if (holder === player) {
+            player.inv = 2.0; // drives the player flash effect
+          } else {
+            // Linemate also loses the puck
+            puck.holder = null;
+            puck.releaseCooldown = 0.4;
+          }
+          break; // one hit per frame is enough
+        }
+      }
+    }
+
+    // controlledLinemate always gets WASD — even after shooting so the user
+    // can reposition. All others run _updateAutonomous:
+    //   • Carrier linemate exists → lead/trail formation
+    //   • Player has puck → lead/trail formation around player
+    //   • Puck is free → seek the puck
     for (const lm of linemates) {
-      lm.update(dt, { player, linemates, keys: lm === puck.holder ? keys : null, puck });
+      lm.update(dt, { player, linemates, keys: lm === controlledLinemate ? keys : null, puck });
     }
   }
 

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { jps } from './jps.js';
 import { nearestFloor, worldToTile, ROWS, COLS, resolveWalls } from './tilemap.js';
+import { playBlock } from './audio.js';
 
 /**
  * Defender entity with behaviour tree AI
@@ -165,6 +166,7 @@ export class Defender {
       if (this.state !== 'BLOCK') {
         this.path = [];
         this.pathCooldown = 0;
+        playBlock(); // Audio feedback on state transition
       }
 
       // Repath to intercept position between puck and goal
