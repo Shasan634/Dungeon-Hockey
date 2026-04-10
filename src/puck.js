@@ -1,5 +1,4 @@
 // puck.js - Puck physics, shooting, and passing
-// COMP 4300 - Dungeon Hockey
 
 import * as THREE from 'three';
 import { resolveWalls } from './tilemap.js';
@@ -73,12 +72,8 @@ export function initPuck(spawnWorld, levelGroup) {
  * Mutates: puck object
  */
 export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
-  // Tick release cooldown so the shooter can eventually re-grab
   if (puck.releaseCooldown > 0) puck.releaseCooldown -= dt;
 
-  // ── Possession mode ──────────────────────────────────────────────────────
-  // When a holder carries the puck, lock it just in front of them and skip
-  // all free-puck physics. Goal detection still runs so you can carry it in.
   if (puck.holder) {
     const h = puck.holder;
     const carryDist = h.radius + puck.radius + 0.05;
@@ -93,31 +88,24 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
     if (goalDist < 2.2) onGoal();
     return;
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
-  // Update position
   puck.x += puck.vx * dt;
   puck.z += puck.vz * dt;
 
-  // Apply friction
   puck.vx *= puck.friction;
   puck.vz *= puck.friction;
 
-  // Stop if moving very slowly
   if (Math.abs(puck.vx) < 0.01) puck.vx = 0;
   if (Math.abs(puck.vz) < 0.01) puck.vz = 0;
 
-  // Wall collision (with velocity dampening) - track speed before/after for audio
   const speedBefore = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
   resolveWalls(puck, true);
   const speedAfter = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
 
-  // Play wall hit sound if puck bounced (significant speed drop)
   if (speedBefore > 2.0 && speedAfter < speedBefore * 0.8) {
     playWallHit(speedBefore);
   }
 
-  // Player collision - deflect free puck
   {
     const dx = puck.x - player.x;
     const dz = puck.z - player.z;
@@ -133,7 +121,6 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
     }
   }
 
-  // Linemate collision - deflect free puck
   for (const linemate of linemates) {
     const ldx = puck.x - linemate.x;
     const ldz = puck.z - linemate.z;
@@ -154,16 +141,13 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
     }
   }
 
-  // Check goal
   const goalDist = Math.hypot(puck.x - goalPos.x, puck.z - goalPos.z);
   if (goalDist < 2.2) onGoal();
 
-  // Update mesh position
   if (puck.mesh) {
     puck.mesh.position.set(puck.x, 0.1, puck.z);
   }
 
-  // Spawn trail spheres when puck is moving fast
   const speed = Math.sqrt(puck.vx * puck.vx + puck.vz * puck.vz);
 
   if (speed > 4.0 && levelGroup && puck.trails.length < 3) {
@@ -174,7 +158,6 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
     puck.trails.push({ mesh: trail, life: 0.15 });
   }
 
-  // Update and fade trail spheres
   for (let i = puck.trails.length - 1; i >= 0; i--) {
     const trail = puck.trails[i];
     trail.life -= dt;
@@ -194,42 +177,38 @@ export function updatePuck(dt, player, linemates, onGoal, goalPos, levelGroup) {
 }
 
 /**
- * Shoots the puck in the direction the shooter is facing.
- * No-ops if the shooter does not currently possess the puck.
- * @param {Object} shooter - any entity with {fx, fz} (player or linemate)
+ * Shoots the puck in the direction the shooter is facing
+ * @param {Object} shooter - any entity with {fx, fz}
  * @param {Object} puck - puck object
  * Mutates: puck.holder, puck.releaseCooldown, puck.vx, puck.vz
  */
 export function shoot(shooter, puck) {
-  if (puck.holder !== shooter) return; // must have possession
+  if (puck.holder !== shooter) return;
   puck.holder = null;
-  puck.releaseCooldown = 0.35; // prevent immediate re-grab
+  puck.releaseCooldown = 0.35;
   const speed = 13;
   puck.vx = shooter.fx * speed;
   puck.vz = shooter.fz * speed;
-  playShoot(); // Audio feedback
+  playShoot();
 }
 
 /**
- * Passes the puck toward the nearest entity in `others`.
- * No-ops if the shooter does not currently possess the puck.
- * Falls back to shooting if no targets exist.
+ * Passes the puck toward the nearest entity
  * @param {Object} shooter - entity initiating the pass with {x, z, fx, fz}
  * @param {Object} puck - puck object
- * @param {Array} others - pass targets (player + linemates, minus the shooter)
+ * @param {Array} others - pass targets
  * Mutates: puck.holder, puck.releaseCooldown, puck.vx, puck.vz
  */
 export function pass(shooter, puck, others) {
-  if (puck.holder !== shooter) return; // must have possession
+  if (puck.holder !== shooter) return;
 
   if (others.length === 0) {
     shoot(shooter, puck);
     return;
   }
 
-  playPass(); // Audio feedback
+  playPass();
 
-  // Find nearest pass target to the shooter
   let nearest = null;
   let minDist = Infinity;
 
@@ -249,7 +228,7 @@ export function pass(shooter, puck, others) {
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist > 0) {
       puck.holder = null;
-      puck.releaseCooldown = 0.1; // short cooldown — receiver should pick up fast
+      puck.releaseCooldown = 0.1;
       const speed = 11;
       puck.vx = (dx / dist) * speed;
       puck.vz = (dz / dist) * speed;

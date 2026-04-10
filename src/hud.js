@@ -1,5 +1,4 @@
 // hud.js - HUD updates and flash messages
-// COMP 4300 - Dungeon Hockey
 
 /**
  * Updates the HUD display with current game state
@@ -16,7 +15,6 @@ export function updateHUD(score, health, room) {
   if (scoreEl) scoreEl.textContent = score;
   if (roomEl) roomEl.textContent = room;
 
-  // Render health as puck icons (each puck = 10 health)
   if (healthIconsEl) {
     const numPucks = Math.ceil(health / 10);
     healthIconsEl.innerHTML = '';
@@ -43,7 +41,6 @@ export function flash(message, good = true) {
   flashEl.className = good ? 'good' : 'bad';
   flashEl.style.opacity = '1';
 
-  // Fade out after 1.2 seconds
   setTimeout(() => {
     flashEl.style.opacity = '0';
   }, 1200);

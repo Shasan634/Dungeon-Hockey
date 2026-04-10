@@ -1,13 +1,10 @@
 // audio.js - Web Audio API sound effects for Dungeon Hockey
-// COMP 4300 - Phase 8: Audio
 
-// AudioContext must be created after a user gesture due to browser autoplay policy.
-// Do NOT create at module load time - initialize via initAudio() after user interaction.
+// Browser autoplay policy requires AudioContext creation after user interaction.
 let audioCtx = null;
 
 /**
  * Initialize the AudioContext after user gesture
- * MUST be called after user clicks/presses key (browser autoplay policy)
  * @returns {AudioContext} the created audio context
  */
 export function initAudio() {

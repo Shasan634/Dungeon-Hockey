@@ -1,193 +1,91 @@
-# Dungeon Hockey - COMP 4300
+# Dungeon Hockey
 
-A top-down hockey roguelike built with vanilla JavaScript and Three.js.
+**Contributors**: 
+- Rezwan Ahmed Sadman (202052452)
+- Shakib Hasan (202053138)
 
-## Project Structure
 
-```
-dungeon-hockey/
-  index.html          # Main HTML with HUD
-  main.js            # Game loop and initialization
-  package.json       # Dependencies
-  src/
-    tilemap.js       # Tilemap data and collision detection
-    dungeon.js       # Procedural dungeon generation (PCG)
-    player.js        # Player movement and input
-    puck.js          # Puck physics
-    entities.js      # Defender and Linemate placeholders
-    hud.js           # HUD updates and flash messages
-    scene.js         # Three.js scene setup
-    level.js         # 3D level building
-```
+A top-down hockey roguelike where you navigate procedurally generated dungeons, avoid AI-controlled defenders, and score goals to progress through rooms. Built with Three.js for 3D rendering and vanilla JavaScript for game logic.
 
-## 🎮 How to Play
+The game combines classic hockey mechanics with dungeon exploration. You control a player who must shoot a puck into the goal while managing two AI linemates and avoiding enemy defenders. Each room you complete spawns a new dungeon with more defenders. Your health decreases when defenders catch you holding the puck, and the game ends when health reaches zero.
 
-**Quick Start:**
-```bash
-npm install
-npm run dev
-```
-Open **http://localhost:5175** and start playing!
-
-**Controls:**
-- **WASD** - Move player
-- **SPACE** - Shoot puck
-- **SHIFT** - Pass
-
-**Objective:** Shoot the puck into the green goal zone to advance to the next room.
-
-**Watch out for defenders!** They change color based on behavior:
-- 🔴 **Red** = Patrolling (safe)
-- 🟠 **Orange** = Chasing puck
-- 💜 **Magenta** = Blocking goal (highest threat!)
-
-See [READY-TO-PLAY.md](READY-TO-PLAY.md) for detailed gameplay guide.
+Defenders use pathfinding to chase the puck or block the goal, linemates flock together and help move the puck forward, and all entities avoid collisions using steering behaviors. The dungeons are generated using procedural content generation, creating unique layouts each time you score.
 
 ## How to Run
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+Install dependencies:
+```bash
+npm install
+```
 
-2. Start development server:
-   ```bash
-   npm run dev
-   ```
+Start the development server:
+```bash
+npm run dev
+```
 
-3. Open browser to the URL shown (usually http://localhost:5173)
+Open your browser to the URL shown in the terminal (usually http://localhost:5173).
 
-Alternative using live-server:
+Alternatively, if you have live-server installed:
 ```bash
 npx live-server
 ```
 
-## What You Should See
+## Controls
 
-### Phase 1 & 2 Implementation
+- **WASD**: Move player (or controlled linemate when not holding puck)
+- **Space**: Shoot puck in facing direction, or pass to nearest teammate
+- **E**: Pass puck to nearest teammate
 
-✅ **Dungeon Generation**
-- Procedurally generated dungeon with 7 rooms connected by L-shaped corridors
-- Dark blue-gray floor with grid overlay
-- Dark stone walls with subtle emissive glow
-- Bright green goal zone in the final room
+The player automatically controls whichever entity (player or linemate) is closest to the puck. When you shoot or pass, control switches to the nearest linemate so you can reposition them.
 
-✅ **Player**
-- Cyan glowing cylinder with hockey stick indicator
-- WASD movement with smooth physics
-- Point light follows player
-- Invincibility flashing after taking damage
+## Algorithms Implemented
 
-✅ **Puck**
-- Orange glowing puck with point light
-- Realistic physics with friction
-- Bounces off walls (dampened)
-- Transfers momentum from player contact
+### Procedural Content Generation
 
-✅ **Controls**
-- **WASD**: Move player
-- **SPACE**: Shoot puck in facing direction
-- **SHIFT**: Pass to nearest linemate (currently acts as shoot since no linemates yet)
+The dungeon generator creates 7 rooms with random dimensions and connects them with L-shaped corridors. Each room is validated to prevent overlap using a 2-tile padding buffer. Corridors are randomly chosen to go horizontal-then-vertical or vertical-then-horizontal. The spawn room is always the first room generated, and the goal is placed in the last room. You can see this algorithm in action every time you score a goal, as a completely new dungeon layout is generated for the next room.
 
-✅ **Game Flow**
-- Shoot puck into green goal zone
-- "GOAL!" flash message appears
-- New dungeon generates after 1.4s
-- Score increases, room counter increments
-- HUD shows score, health, and room number
+### Pathfinding (Jump Point Search)
 
-✅ **Visual Style**
-- Dark blue-gray background with improved visibility
-- Medium blue-gray walls with emissive glow (clearly visible)
-- Darker blue-gray floor with grid overlay
-- Cyan player with emissive glow
-- Orange puck with warm glow
-- Warm orange torch lights in intermediate rooms
-- Bright green goal with glow effect
-- Enhanced lighting for better contrast
+Defenders use Jump Point Search, an optimization of A* pathfinding for uniform-cost grids. JPS identifies "jump points" where the search direction must change, skipping over tiles in open spaces. This is much faster than standard A* in our wide open rooms where many symmetric paths exist. Watch the defenders to see JPS in action - they path smoothly around walls and through corridors to chase the puck or block the goal.
 
-## Algorithm Categories Implemented
+### Decision Making (Behaviour Tree)
 
-### Phase 2: Procedural Content Generation (PCG)
+Each defender runs a priority selector behaviour tree with three states: BLOCK (guard goal when player is nearby), CHASE (pursue puck when in range), and PATROL (wander randomly). Higher priority states override lower ones, so blocking the goal always takes precedence over chasing. The defender's color changes based on its current state: magenta for blocking, orange for chasing, red for patrolling. You can trigger BLOCK mode by carrying the puck near the goal.
 
-**File**: [src/dungeon.js](src/dungeon.js)
+### Complex Movement (Collision Avoidance)
 
-Room-based dungeon generation algorithm:
-1. Places NUM_ROOMS (7) rectangular rooms with random dimensions
-2. Validates room placement with 2-tile padding to prevent overlap
-3. Connects rooms with L-shaped corridors (randomly horizontal-then-vertical or vertical-then-horizontal)
-4. Idempotent - can regenerate fresh dungeons on demand
+Defenders use Reynolds-style separation steering to avoid clustering. A repulsive force is applied when defenders get too close to each other, maintaining spacing even in tight corridors. This force is computed after pathfinding but before position updates, so defenders still follow their paths but smoothly slide around each other. You'll notice defenders form natural queues in corridors and spread out when blocking the goal instead of stacking on the same tile.
 
-This is NOT a maze generator (no depth-first backtracking) - it creates actual wide rooms connected by corridors, as required.
+### Flocking
 
-### Phase 3: Jump Point Search (Pathfinding) ✅
+The two linemates move as a coordinated group using three flocking forces: separation (avoid crowding), alignment (match velocity with neighbors), and cohesion (move toward group center). When no one has the puck, linemates seek toward it while maintaining flock formation. When a linemate holds the puck, the others trail behind and spread out to receive passes. Watch the linemates form triangular formations as they move up the ice together.
 
-**File**: [src/jps.js](src/jps.js)
+## How to View Each Algorithm
 
-Jump Point Search pathfinding - an optimization of A* for uniform-cost grids:
-- Identifies "jump points" where search direction must change
-- Prunes symmetric paths in open rooms (common in our dungeon generator)
-- Forces neighbour detection creates path asymmetry around walls
-- Dramatically reduces nodes expanded vs. standard A*
+Start the game and wait for defenders to spawn (they appear as glowing cylinders with eye markers). Stand still and watch the defenders patrol randomly (red color) to see the PATROL state. Drop the puck and watch defenders path toward it (orange color) to see JPS pathfinding and CHASE state working together. Pick up the puck and skate toward the goal - defenders will turn magenta and rush to block, demonstrating the BLOCK state and priority selector. Notice how they never stack on top of each other due to collision avoidance. Finally, press E to pass to a linemate and watch how all three teammates maintain spacing and formation using flocking behavior.
 
-**Why JPS here**: Our wide open rooms create many equivalent paths. A* would expand every tile along all symmetric paths. JPS skips to jump points, expanding 5-10x fewer nodes.
+## Project Structure
 
-**Testing**: See [PHASE3-JPS.md](PHASE3-JPS.md) for detailed testing guide and verification steps.
+```
+Dungeon_Hockey/
+  index.html           # Main HTML with HUD and game UI
+  main.js              # Game loop, input handling, game state
+  src/
+    audio.js           # Web Audio API sound generation
+    dungeon.js         # Procedural dungeon generation (PCG)
+    entities.js        # Defender (behaviour tree + JPS) and Linemate (flocking)
+    hud.js             # HUD updates and flash messages
+    jps.js             # Jump Point Search pathfinding
+    level.js           # 3D level building from tilemap
+    player.js          # Player movement and skate trails
+    puck.js            # Puck physics and possession system
+    scene.js           # Three.js scene setup
+    tilemap.js         # Tilemap collision detection and coordinate conversion
+```
 
-### Phase 4: Behaviour Tree (Decision Making) ✅
+## Built With
 
-**File**: [src/entities.js](src/entities.js)
-
-Priority selector behaviour tree for Defender AI:
-- **BLOCK** (Priority 1): Guard goal when player nearby - magenta color, 1.4x speed
-- **CHASE** (Priority 2): Pursue puck when in range - orange color, 1.15x speed
-- **PATROL** (Priority 3): Wander randomly (default) - red color, 1.0x speed
-
-**Why priority selector**: Clear hierarchy ensures exactly one active behavior. BLOCK overrides CHASE because preventing goals is more critical than chasing the puck.
-
-**Visual feedback**: Defender body and eye change color in real-time based on active state.
-
-**Testing**: See [PHASE4-BEHAVIOUR-TREE.md](PHASE4-BEHAVIOUR-TREE.md) for state testing and tuning guide.
-
-### Phase 5: Collision Avoidance (Complex Movement) ✅
-
-**File**: [src/entities.js](src/entities.js)
-
-Reynolds-style separation steering for smooth defender movement:
-- **Defender separation**: Repulsive force prevents clustering and stacking
-- **0.5 padding**: Maintains visual spacing even before physical overlap
-- **Player push**: Defenders give way (30%) when contacting player
-- **Order matters**: Avoidance modifies velocity after pathfinding, before physics
-
-**Why after path following**: Path following sets the desired velocity (goal), avoidance modifies it (obstacle response), position update applies the final result. This preserves pathfinding intent while adding smooth obstacle avoidance.
-
-**Visual improvement**: Defenders form natural formations (queues in corridors, walls at goal) instead of stacking on same tile.
-
-**Testing**: See [PHASE5-COLLISION-AVOIDANCE.md](PHASE5-COLLISION-AVOIDANCE.md) for verification tests and tuning guide.
-
-## Next Steps - Phase 6
-
-**Flocking Behavior for Linemates**
-
-Phases 1-5 are complete. Final phase adds coordinated group movement:
-- **Phase 6**: Flocking (Separation + Alignment + Cohesion) for Linemates
-
-**File to modify**: [src/entities.js](src/entities.js:298) - Linemate class is empty and ready
-
-Linemates will move as a coordinated group using three Reynolds behaviors: separate to avoid crowding, align velocity with neighbors, and cohere toward group center.
-
-## Technical Notes
-
-- **Three.js version**: 0.160.0 (latest via npm)
-- **No game engines**: Pure JavaScript with Three.js for rendering only
-- **No TypeScript**: Plain ES6 modules
-- **Camera**: Orthographic top-down view
-- **Physics**: Custom circle-vs-AABB collision (no physics engine)
-- **Rendering**: All game objects added to `levelGroup` for easy level transitions
-
-## Code Quality
-
-- Every function is documented with JSDoc comments
-- Clear separation of concerns (one module per responsibility)
-- Mutating functions clearly marked in comments
-- Professor-friendly code structure for grading
+- **Three.js r128** - 3D rendering library
+- **Vite** - Development server and build tool
+- **Web Audio API** - Procedural sound generation (no external audio files)
+- **Vanilla JavaScript** - No game engines or frameworks

@@ -1,6 +1,4 @@
-// dungeon.js - Procedural dungeon generation using room placement + corridors
-// COMP 4300 - Dungeon Hockey
-// Algorithm Category: Procedural Content Generation (PCG)
+// dungeon.js - Procedural dungeon generation using room placement and corridors
 
 import { tilemap, COLS, ROWS } from './tilemap.js';
 
@@ -19,7 +17,6 @@ let rooms = [];
  * @returns {Array<Object>} array of room objects {x, y, w, h, cx, cy}
  */
 export function generateDungeon() {
-  // Reset tilemap to all walls
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       tilemap[r][c] = 1;
@@ -28,7 +25,6 @@ export function generateDungeon() {
 
   rooms = [];
 
-  // Place NUM_ROOMS rooms
   for (let roomIdx = 0; roomIdx < NUM_ROOMS; roomIdx++) {
     let placed = false;
     let attempts = 0;
@@ -36,15 +32,12 @@ export function generateDungeon() {
     while (!placed && attempts < MAX_TRIES) {
       attempts++;
 
-      // Random room dimensions
       const w = Math.floor(Math.random() * (MAX_W - MIN_W + 1)) + MIN_W;
       const h = Math.floor(Math.random() * (MAX_H - MIN_H + 1)) + MIN_H;
 
-      // Random position with 1-tile border
       const x = Math.floor(Math.random() * (COLS - w - 2)) + 1;
       const y = Math.floor(Math.random() * (ROWS - h - 2)) + 1;
 
-      // Check overlap with existing rooms (2-tile padding)
       let overlaps = false;
       for (const room of rooms) {
         if (!(x + w + 2 < room.x || x - 2 > room.x + room.w ||
@@ -55,14 +48,12 @@ export function generateDungeon() {
       }
 
       if (!overlaps) {
-        // Carve out the room
         for (let r = y; r < y + h; r++) {
           for (let c = x; c < x + w; c++) {
             tilemap[r][c] = 0;
           }
         }
 
-        // Store room data
         const cx = Math.floor(x + w / 2);
         const cy = Math.floor(y + h / 2);
         rooms.push({ x, y, w, h, cx, cy });
@@ -71,12 +62,10 @@ export function generateDungeon() {
     }
   }
 
-  // Connect each room to the previous one with L-shaped corridors
   for (let i = 1; i < rooms.length; i++) {
     const prev = rooms[i - 1];
     const curr = rooms[i];
 
-    // Randomly choose horizontal-then-vertical or vertical-then-horizontal
     if (Math.random() < 0.5) {
       carveHCorridor(prev.cx, curr.cx, prev.cy);
       carveVCorridor(prev.cy, curr.cy, curr.cx);

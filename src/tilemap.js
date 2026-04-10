@@ -1,5 +1,4 @@
 // tilemap.js - Tilemap data structure and collision detection
-// COMP 4300 - Dungeon Hockey
 
 export const COLS = 23;
 export const ROWS = 17;

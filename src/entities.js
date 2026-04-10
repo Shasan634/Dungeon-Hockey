@@ -1,6 +1,4 @@
 // entities.js - Defender and Linemate AI entities
-// COMP 4300 - Dungeon Hockey
-// Phase 3: JPS pathfinding | Phase 4: Behaviour tree
 
 import * as THREE from 'three';
 import { jps } from './jps.js';
@@ -63,19 +61,15 @@ export class Defender {
 
   /**
    * Main update loop
-   * Order: cooldown → tick → path follow → avoidance → physics → render
    * @param {number} dt - delta time in seconds
    * @param {Array} allDefenders - array of all defender entities
    * Mutates: this.x, this.z, this.vx, this.vz, this.angle, this.path, this.state
    */
   update(dt, allDefenders) {
-    // 1. Update path cooldown
     this.pathCooldown -= dt;
-
-    // 2. Behaviour tree tick - determines state and manages path
     this.tick();
 
-    // 3. Path following - compute velocity towards next waypoint
+    // Path following
     if (this.path.length > 0) {
       const target = this.path[0];
       const dx = target.x - this.x;
@@ -83,10 +77,8 @@ export class Defender {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist < 0.5) {
-        // Arrived at waypoint, move to next
         this.path.shift();
       } else {
-        // Move towards waypoint
         const speedMultiplier = this._getSpeedMultiplier();
         const speed = this.speed * speedMultiplier;
         this.vx = (dx / dist) * speed;
@@ -94,26 +86,18 @@ export class Defender {
         this.angle = Math.atan2(this.vx, this.vz);
       }
     } else {
-      // No path - decelerate
       this.vx *= 0.75;
       this.vz *= 0.75;
     }
 
-    // 4. Collision avoidance - Reynolds-style separation
-    // Runs after path following sets the desired velocity, but before position update.
-    // This allows avoidance forces to modify velocity while maintaining pathfinding intent.
+    // Collision avoidance applied after path following sets desired velocity
     this._avoidOthers(allDefenders);
 
-    // 5. Update position
     this.x += this.vx * dt;
     this.z += this.vz * dt;
-
-    // 6. Wall collision
     resolveWalls(this);
 
-    // 7. Physical push against player
-    // Defender gives way slightly (0.3 factor) to avoid being totally immovable.
-    // Damage is still handled in updatePlayer - this is just the physical interaction.
+    // Physical push against player (defender gives way 30%)
     const dx = this.x - this.player.x;
     const dz = this.z - this.player.z;
     const d = Math.hypot(dx, dz);
@@ -124,31 +108,17 @@ export class Defender {
       this.z += (dz / d) * overlap * 0.3;
     }
 
-    // 8. Update mesh
     this.mesh.position.set(this.x, 0.26, this.z);
     this.mesh.rotation.y = this.angle;
-
-    // 9. Update material colors based on state
     this._updateColors();
   }
 
   /**
    * Behaviour Tree - Priority Selector Pattern
    *
-   * The tree evaluates conditions from highest to lowest priority.
-   * The first condition that returns true determines the active behavior.
-   *
-   * Priority 1: BLOCK - Guard the goal when player is nearby
-   *   - Highest priority because preventing goals is critical
-   *   - Defenders abandon all other tasks to block scoring attempts
-   *
-   * Priority 2: CHASE - Pursue the puck when in range
-   *   - Second priority: stop the puck from advancing
-   *   - Only activates if BLOCK condition is false
-   *
-   * Priority 3: PATROL - Default wandering behavior
-   *   - Lowest priority: always active as fallback
-   *   - Keeps defenders moving when no threats detected
+   * BLOCK: Guard goal when player nearby (highest priority)
+   * CHASE: Pursue puck when in range
+   * PATROL: Wander randomly (fallback)
    *
    * State transitions clear the path and force immediate replanning.
    */
@@ -158,57 +128,46 @@ export class Defender {
 
     let newState = this.state;
 
-    // Priority 1: BLOCK - Player approaching goal
     if (distToGoal < 5.5) {
       newState = 'BLOCK';
 
-      // On state enter: clear path and force immediate repath
       if (this.state !== 'BLOCK') {
         this.path = [];
         this.pathCooldown = 0;
-        playBlock(); // Audio feedback on state transition
+        playBlock();
       }
 
-      // Repath to intercept position between puck and goal
-      // This makes defenders actively block the puck rather than just standing in goal
       if (this.pathCooldown <= 0) {
         const interceptPos = this._calculateIntercept(this.puck.x, this.puck.z, this.goalPos.x, this.goalPos.z);
         this._repath(interceptPos.x, interceptPos.z);
         this.pathCooldown = 0.4;
       }
     }
-    // Priority 2: CHASE - Puck is nearby
     else if (distToPuck < 8.0) {
       newState = 'CHASE';
 
-      // On state enter: clear path and force immediate repath
       if (this.state !== 'CHASE') {
         this.path = [];
         this.pathCooldown = 0;
       }
 
-      // Repath to puck position when cooldown expires
       if (this.pathCooldown <= 0) {
         this._repath(this.puck.x, this.puck.z);
         this.pathCooldown = 0.3;
       }
     }
-    // Priority 3: PATROL - Default behavior
     else {
       newState = 'PATROL';
 
-      // On state enter: find initial patrol point
       if (this.state !== 'PATROL') {
         this._findPatrol();
       }
 
-      // When path is empty, find new patrol point
       if (this.path.length === 0) {
         this._findPatrol();
       }
     }
 
-    // Update state
     this.state = newState;
   }
 
@@ -224,8 +183,6 @@ export class Defender {
     const { r: gr, c: gc } = nearestFloor(tx, tz);
     this.path = jps(sr, sc, gr, gc);
 
-    // Debug logging to verify JPS is running
-    console.log(`[JPS] Path computed: ${this.path.length} waypoints from (${sr},${sc}) to (${gr},${gc})`);
   }
 
   /**
@@ -233,45 +190,29 @@ export class Defender {
    * Mutates: this.path
    */
   _findPatrol() {
-    // Pick a random tile in the map
     const maxAttempts = 50;
     for (let i = 0; i < maxAttempts; i++) {
       const r = Math.floor(Math.random() * ROWS);
       const c = Math.floor(Math.random() * COLS);
 
-      // Find nearest floor tile to this random position
       const { r: fr, c: fc } = nearestFloor(
         (c - COLS / 2) * 2.0 + 1.0,
         (r - ROWS / 2) * 2.0 + 1.0
       );
 
-      // Convert to world coordinates
       const tx = (fc - COLS / 2) * 2.0 + 1.0;
       const tz = (fr - ROWS / 2) * 2.0 + 1.0;
 
-      // Path to this location
       this._repath(tx, tz);
 
       if (this.path.length > 0) {
-        console.log(`[Defender] Patrol point selected: (${fr},${fc})`);
         return;
       }
     }
-
-    console.log('[Defender] Failed to find patrol point');
   }
 
   /**
-   * Reynolds-style separation force to avoid clustering with other defenders
-   * Applies repulsive force when defenders get too close to each other.
-   *
-   * The 0.5 padding on top of combined radii keeps defenders visually separated
-   * even before they are physically overlapping. This prevents the "clumping"
-   * effect where multiple defenders stack on the same tile.
-   *
-   * The 1e-4 guard prevents division by zero when two defenders are at exactly
-   * the same position (edge case during spawning or physics glitches).
-   *
+   * Reynolds-style separation force to avoid clustering
    * @param {Array} allDefenders - array of all defender entities
    * Mutates: this.vx, this.vz
    */
@@ -283,11 +224,9 @@ export class Defender {
       const dz = this.z - other.z;
       const d = Math.hypot(dx, dz);
 
-      // minDist includes 0.5 padding for visual separation
       const minDist = this.radius + other.radius + 0.5;
 
       if (d < minDist && d > 1e-4) {
-        // Apply separation force proportional to penetration depth
         const force = (minDist - d) * 2.0;
         this.vx += (dx / d) * force;
         this.vz += (dz / d) * force;
@@ -311,9 +250,6 @@ export class Defender {
 
   /**
    * Calculates intercept position between puck and goal for blocking
-   * Positions defender on the line between puck and goal, 2 units in front of goal.
-   * This creates active blocking behavior rather than just standing in the goal.
-   *
    * @param {number} puckX - puck world x position
    * @param {number} puckZ - puck world z position
    * @param {number} goalX - goal world x position
@@ -321,17 +257,14 @@ export class Defender {
    * @returns {{x: number, z: number}} intercept position in world coordinates
    */
   _calculateIntercept(puckX, puckZ, goalX, goalZ) {
-    // Calculate direction from goal to puck
     const dx = puckX - goalX;
     const dz = puckZ - goalZ;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    // If puck is very close to goal or at goal, just defend goal position
     if (dist < 2.0) {
       return { x: goalX, z: goalZ };
     }
 
-    // Position defender 2 units from goal toward the puck
     const interceptDist = 2.0;
     const nx = dx / dist;
     const nz = dz / dist;
@@ -348,9 +281,9 @@ export class Defender {
    */
   _getSpeedMultiplier() {
     switch (this.state) {
-      case 'BLOCK': return 1.4;  // Fast - goal defense is urgent
-      case 'CHASE': return 1.15; // Medium - pursue puck
-      case 'PATROL': return 1.0; // Normal - relaxed wandering
+      case 'BLOCK': return 1.4;
+      case 'CHASE': return 1.15;
+      case 'PATROL': return 1.0;
       default: return 1.0;
     }
   }
@@ -384,18 +317,8 @@ export class Defender {
 }
 
 /**
- * Linemate entity - friendly AI with flocking behavior (Phase 6)
- *
- * All linemates share identical color and design. The one nearest to the puck
- * becomes the active linemate: it is highlighted with a yellow ring and its
- * movement is driven by player input (WASD) instead of flocking. All other
- * linemates continue to use autonomous flocking (cohesion + separation +
- * alignment) relative to the main player.
- *
- * Flocking behaviors (applied when NOT controlled):
- *   Cohesion   — pull toward player, weighted linearly by distance.
- *   Separation — graded repulsion from player and other linemates.
- *   Alignment  — steer to match player's velocity direction, scaled by speed.
+ * Linemate entity with flocking behavior
+ * Controlled by WASD when nearest to puck, otherwise moves autonomously
  */
 export class Linemate {
   constructor(x, z, levelGroup) {
@@ -408,7 +331,6 @@ export class Linemate {
     this.fz = 0;    // facing direction z
     this.angle = 0;
 
-    // Teal cylinder — identical design for every linemate
     const geometry = new THREE.CylinderGeometry(0.35, 0.35, 0.52, 10);
     this.mat = new THREE.MeshStandardMaterial({
       color: 0x22dd88,
@@ -418,12 +340,10 @@ export class Linemate {
     this.mesh = new THREE.Mesh(geometry, this.mat);
     this.mesh.position.set(this.x, 0.26, this.z);
 
-    // Atmospheric glow
     const light = new THREE.PointLight(0x22dd88, 0.6, 2.5);
     light.position.set(0, 0.4, 0);
     this.mesh.add(light);
 
-    // Yellow ring shown when this linemate is the active/controlled one
     const ringMat = new THREE.MeshStandardMaterial({
       color: 0xffee00,
       emissive: 0xffee00,
@@ -433,12 +353,11 @@ export class Linemate {
       new THREE.TorusGeometry(0.58, 0.07, 8, 28),
       ringMat
     );
-    this.highlightRing.rotation.x = Math.PI / 2; // lay flat on the ground plane
+    this.highlightRing.rotation.x = Math.PI / 2;
     this.highlightRing.position.y = -0.22;
     this.highlightRing.visible = false;
     this.mesh.add(this.highlightRing);
 
-    // Helmet — identical to player
     const helmetGeometry = new THREE.SphereGeometry(0.25, 12, 12);
     const helmetMaterial = new THREE.MeshStandardMaterial({
       color: 0x00aadd,
@@ -449,7 +368,6 @@ export class Linemate {
     helmet.position.set(0, 0.5, 0);
     this.mesh.add(helmet);
 
-    // Visor — identical to player
     const visorGeometry = new THREE.PlaneGeometry(0.3, 0.15);
     const visorMaterial = new THREE.MeshStandardMaterial({
       color: 0x0088ff,
@@ -467,8 +385,7 @@ export class Linemate {
   }
 
   /**
-   * Shows or hides the highlight ring.
-   * Called each frame by main.js based on who is closest to the puck.
+   * Shows or hides the highlight ring
    * @param {boolean} active
    */
   setHighlight(active) {
@@ -476,10 +393,9 @@ export class Linemate {
   }
 
   /**
-   * Main update — delegates to controlled or autonomous path.
+   * Main update
    * @param {number} dt - delta time in seconds
    * @param {{player: Object, linemates: Array, keys: Object|null, puck: Object}} context
-   *   keys: live key state when this linemate is controlled; null otherwise
    */
   update(dt, { player, linemates, keys, puck }) {
     if (keys) {
@@ -495,8 +411,7 @@ export class Linemate {
   }
 
   /**
-   * Player-driven movement — same WASD feel as the main player.
-   * Updates fx/fz so shoot() works correctly from a linemate.
+   * Player-driven movement with WASD
    */
   _updateControlled(dt, keys) {
     let ix = 0, iz = 0;
@@ -523,49 +438,28 @@ export class Linemate {
   }
 
   /**
-   * Autonomous movement — three distinct modes based on puck possession:
-   *
-   *   No linemate holds the puck
-   *     → Seek the puck directly. Both linemates converge on it so either
-   *       can pick it up and immediately enter possession mode.
-   *
-   *   This linemate holds the puck (controlled by player input via _updateControlled,
-   *   so this path is never reached for the carrier itself.)
-   *
-   *   Another linemate holds the puck
-   *     → One non-carrier takes a LEAD position (LEAD_DIST ahead of the carrier
-   *       in the carrier's facing direction) and one takes a TRAIL position
-   *       (TRAIL_DIST behind). Role is assigned by dot-product: whichever
-   *       non-carrier is currently more "in front" of the carrier leads, the
-   *       other trails. This creates natural forward and backward pass lanes.
-   *
-   * Separation from the player and other linemates is applied in all modes
-   * to prevent stacking.
-   *
+   * Autonomous movement with flocking behavior
    * @param {number} dt
    * @param {Object} player
-   * @param {Array}  linemates - full linemates array (includes this)
-   * @param {Object} puck      - puck object with .holder, .x, .z
+   * @param {Array}  linemates
+   * @param {Object} puck
    */
   _updateAutonomous(dt, player, linemates, puck) {
-    const SPRINT_STRENGTH = 30.0; // puck-seek acceleration — equilibrium 7.5 → clamped to MAX_SPEED
-    const FORM_STRENGTH   = 20.0; // formation seek acceleration (lead/trail positioning)
-    const SEP_STRENGTH    = 12.0; // separation acceleration
-    const SEP_PLAYER_R    = 2.8;  // min distance from player
-    const SEP_MATE_R      = 2.2;  // min distance between linemates
-    const DRAG            = 4.0;  // velocity damping (1/s)
+    const SPRINT_STRENGTH = 30.0;
+    const FORM_STRENGTH   = 20.0;
+    const SEP_STRENGTH    = 12.0;
+    const SEP_PLAYER_R    = 2.8;
+    const SEP_MATE_R      = 2.2;
+    const DRAG            = 4.0;
     const MAX_SPEED       = 5.2;
-    const LEAD_DIST       = 3.5;  // units ahead of carrier for the lead linemate
-    const TRAIL_DIST      = 3.0;  // units behind carrier for the trail linemate
+    const LEAD_DIST       = 3.5;
+    const TRAIL_DIST      = 3.0;
 
-    // ── Determine seek target ─────────────────────────────────────────────
     let targetX, targetZ;
 
-    // Is a linemate (other than this one) holding the puck?
     const carrier = linemates.find(lm => lm !== this && lm === puck.holder);
 
     if (carrier) {
-      // ── A linemate carries the puck: lead/trail around that linemate ───
       const others = linemates.filter(lm => lm !== carrier);
 
       const myDot   = (this.x - carrier.x) * carrier.fx + (this.z - carrier.z) * carrier.fz;
@@ -574,7 +468,6 @@ export class Linemate {
         ? (peer.x - carrier.x) * carrier.fx + (peer.z - carrier.z) * carrier.fz
         : -Infinity;
 
-      // Higher dot = more "in front" of the carrier → takes lead position
       const isLead = myDot >= peerDot;
 
       if (isLead) {
@@ -585,7 +478,6 @@ export class Linemate {
         targetZ = carrier.z - carrier.fz * TRAIL_DIST;
       }
     } else if (puck.holder === player) {
-      // ── Player carries the puck: lead/trail around the player ─────────
       const peer    = linemates.find(lm => lm !== this);
       const myDot   = (this.x - player.x) * player.fx + (this.z - player.z) * player.fz;
       const peerDot = peer
@@ -602,12 +494,10 @@ export class Linemate {
         targetZ = player.z - player.fz * TRAIL_DIST;
       }
     } else {
-      // ── Puck is free — seek it directly ───────────────────────────────
       targetX = puck.x;
       targetZ = puck.z;
     }
 
-    // ── Seek target ───────────────────────────────────────────────────────
     let ax = 0, az = 0;
     {
       const dx = targetX - this.x;
@@ -615,20 +505,16 @@ export class Linemate {
       const dist = Math.hypot(dx, dz);
       if (dist > 0.05) {
         if (carrier) {
-          // Formation positioning: arrive taper within 2 units to avoid overshoot
           const weight = Math.min(dist / 2.0, 1.0);
           ax += (dx / dist) * FORM_STRENGTH * weight;
           az += (dz / dist) * FORM_STRENGTH * weight;
         } else {
-          // Puck sprint: no arrive damping — full force all the way to the puck
-          // SPRINT_STRENGTH / DRAG = 30/4 = 7.5 equilibrium → clamped to MAX_SPEED
           ax += (dx / dist) * SPRINT_STRENGTH;
           az += (dz / dist) * SPRINT_STRENGTH;
         }
       }
     }
 
-    // ── Separation from player ────────────────────────────────────────────
     {
       const dx = this.x - player.x;
       const dz = this.z - player.z;
@@ -640,7 +526,6 @@ export class Linemate {
       }
     }
 
-    // ── Separation from other linemates ──────────────────────────────────
     for (const other of linemates) {
       if (other === this) continue;
       const dx = this.x - other.x;
@@ -653,7 +538,6 @@ export class Linemate {
       }
     }
 
-    // ── Integrate (velocity-proportional drag, frame-rate stable) ────────
     this.vx = this.vx * (1.0 - DRAG * dt) + ax * dt;
     this.vz = this.vz * (1.0 - DRAG * dt) + az * dt;
 

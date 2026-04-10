@@ -1,5 +1,4 @@
 // level.js - 3D level building from tilemap
-// COMP 4300 - Dungeon Hockey
 
 import * as THREE from 'three';
 import { generateDungeon, getSpawnRoom, getGoalRoom } from './dungeon.js';
